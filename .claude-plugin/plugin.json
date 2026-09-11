@@ -1,6 +1,6 @@
 {
   "name": "kb-compiler",
-  "version": "0.8.1",
+  "version": "0.8.2",
   "description": "Documentation standard for a knowledge base (KB) — section structure, exact Word formatting, KB-XXX naming conventions, and a master-index spreadsheet — with a read-only audit script, a bootstrap script and a test suite. English is the canonical language; a base may be authored in any language confirmed at setup.",
   "author": {
     "name": "Lucas Souza"

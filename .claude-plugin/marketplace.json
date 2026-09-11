@@ -6,7 +6,7 @@
   },
   "metadata": {
     "description": "Documentation standard for IT knowledge bases, with a read-only audit script and test suite.",
-    "version": "0.8.1"
+    "version": "0.8.2"
   },
   "plugins": [
     {
@@ -14,7 +14,12 @@
       "source": "./",
       "description": "Documentation standard for a knowledge base (KB) — section structure, exact Word formatting, KB-XXX naming conventions, and a master-index spreadsheet — with a read-only audit script, a bootstrap script and a test suite.",
       "category": "documentation",
-      "tags": ["documentation", "knowledge-base", "runbook", "audit"]
+      "tags": [
+        "documentation",
+        "knowledge-base",
+        "runbook",
+        "audit"
+      ]
     }
   ]
 }

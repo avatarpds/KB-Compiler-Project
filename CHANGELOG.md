@@ -2,6 +2,20 @@
 
 All notable changes to this project are documented here.
 
+## 0.8.2
+
+- Added `.claude-plugin/marketplace.json`, so the repository is both the plugin
+  and its own single-plugin catalog. Installing is now two commands rather than
+  a manual copy of the skill folder:
+
+  ```
+  /plugin marketplace add avatarpds/KB-Compiler-Project
+  /plugin install kb-compiler@kb-compiler
+  ```
+
+  Third-party marketplaces have auto-update disabled by default, so run
+  `/plugin marketplace update kb-compiler` to pick up later versions.
+
 ## 0.8.1
 
 - Duplicate file names across folders are resolved using the row's category tab

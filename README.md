@@ -18,6 +18,25 @@ The skill's own instructions are written in English, so Claude follows them prec
 
 This helps anyone on the team create, review, or fix KB documents already following the same standard — without memorizing the formatting rules or manually checking every consistency detail.
 
+## Installing
+
+```
+/plugin marketplace add avatarpds/KB-Compiler-Project
+/plugin install kb-compiler@kb-compiler
+```
+
+The repository is both the plugin and its own single-plugin catalog, so those
+two commands are all it takes. Third-party marketplaces have auto-update
+disabled by default — run `/plugin marketplace update kb-compiler` to pick up
+later versions.
+
+If `/plugin` isn't available in your environment, use the plugin browser in the
+Claude desktop app, or declare the plugin under `enabledPlugins` in
+`.claude/settings.json`.
+
+The validation scripts are plain Python and run standalone, with or without the
+plugin installed — see below.
+
 ## How to use it
 
 Once installed, just ask normally, for example:
