@@ -29,9 +29,21 @@ WHAT IT CHECKS
    Revision | Reviewer, with no semantic-version column) — reported as its
    own item, so it doesn't produce a false version divergence by comparing a
    date against a version number.
-7. Header missing the tab separator between name and version (e.g. "Namev1.2"
-   glued together instead of "Name<TAB>v1.2") — reported as its own item, so
-   it doesn't show up disguised as a generic version divergence.
+7. Header missing the tab separator between name and version — either glued
+   ("Namev1.2") or separated by a space ("Name v1.2"). Reported as its own
+   item, so it doesn't show up disguised as a generic version divergence, or
+   worse, as a NAME divergence whose recommendation tells you to copy the
+   broken name into the other three sources. The spaced form is only treated
+   as a version when the file name or the Version History agrees that is what
+   it is — otherwise "Migracao Office v2" would lose its own name.
+8. Header with no version at all. Section 4 requires one in every header, and
+   an absent version used to be invisible: the version comparison drops empty
+   sources before comparing, so {None, "1.0", "1.0"} collapsed to one value
+   and reported nothing.
+9. Documents the spreadsheet points at that exist but cannot be parsed as Word
+   documents. Reported once, under their own heading: such a file used to
+   produce three findings at once — a "broken reference" claiming a file that
+   plainly exists doesn't, plus a structure and a formatting violation.
 
 In addition, at the end of the report, an INFORMATIONAL section (never
 counted as a problem) lists files whose name contains a non-ASCII character
@@ -112,6 +124,15 @@ import json
 import re
 import datetime
 import unicodedata
+
+# Windows defaults stdout to the locale encoding (cp1252) whenever it is not a
+# console, so redirecting or piping this report died with a UnicodeEncodeError
+# on the first section title containing "→" — after printing two lines, and
+# exiting 1, which reads as "problems found" rather than "crashed". The report
+# is full of "→", "—" and "⚠", so the stream is pinned to UTF-8 instead.
+for _stream in (sys.stdout, sys.stderr):
+    if hasattr(_stream, "reconfigure"):
+        _stream.reconfigure(encoding="utf-8", errors="replace")
 
 try:
     import docx
@@ -439,21 +460,98 @@ def classify_table_header(header_cells):
     return None, None, None
 
 
-def read_docx_signals(full_path):
-    """Extracts the title, header, header version, and Version History table signals."""
+def _file_stem(full_path):
+    """The document's own file name without extension, NFC-normalized."""
+    return nfc(os.path.splitext(os.path.basename(full_path))[0]).strip()
+
+
+def _parse_header(signals, hdr_text, full_path):
+    """
+    Splits the header into name and version, and classifies the separator.
+
+    Section 4 mandates "<name><TAB>v<version>". Three broken shapes have to be
+    told apart from a legitimate name that merely ends in something
+    version-shaped ("... Office v2"):
+
+      - glued:  "Namev1.0"   — no separator at all
+      - spaced: "Name v1.0"  — a space where the tab belongs
+      - no version in the header at all
+
+    The spaced case is the one that needs care. Treating every trailing "v<n>"
+    as a version would misread "Migracao Office v2"; treating none of them as a
+    version left a space-separated header — the likeliest way to get this wrong
+    by hand — reported as a NAME divergence instead, whose recommendation told
+    you to propagate "Alpha v1.0" into the file name and the title. So the
+    trailing token counts as a version only when another source agrees: the
+    file name matches the remainder, or the Version History records exactly
+    that version.
+    """
+    signals["header"] = hdr_text
+
+    if "\t" in hdr_text:
+        signals["header_name"] = hdr_text.split("\t")[0].strip()
+        tail = hdr_text.split("\t")[-1].strip()
+        if tail.lower().startswith("v") and tail[1:2].isdigit():
+            signals["header_version"] = tail[1:].strip()
+        else:
+            signals["header_missing_version"] = True
+        return
+
+    # "Namev1.2": glued straight onto a word character. The lookbehind is what
+    # keeps "Migracao Office v2" out of this branch.
+    m = re.search(r"(?<=\w)v\d+(\.\d+)?$", hdr_text, re.IGNORECASE)
+    if m:
+        signals["header_missing_tab"] = True
+        signals["header_version"] = m.group(0)[1:]
+        # The regex knows where the version starts, so the name is everything
+        # before it. Leaving the version glued on would report the SAME defect
+        # twice — once correctly, once as a bogus name divergence.
+        signals["header_name"] = hdr_text[: m.start()].strip()
+        return
+
+    # "Name v1.2": a space where the tab belongs.
+    m = re.search(r"\s+v(\d+(?:\.\d+)?)$", hdr_text, re.IGNORECASE)
+    if m:
+        candidate_name = hdr_text[: m.start()].strip()
+        candidate_version = m.group(1)
+        agrees_with_file = nfc(candidate_name) == _file_stem(full_path)
+        agrees_with_history = (
+            signals["history_version"] is not None
+            and candidate_version == signals["history_version"]
+        )
+        if agrees_with_file or agrees_with_history:
+            signals["header_missing_tab"] = True
+            signals["header_version"] = candidate_version
+            signals["header_name"] = candidate_name
+            return
+
+    # Nothing version-shaped to split off: the whole header is the name, and it
+    # carries no version — which Section 4 requires it to.
+    signals["header_name"] = hdr_text
+    signals["header_missing_version"] = True
+
+
+def read_docx_signals(full_path, doc=None):
+    """
+    Extracts the title, header, header version, footer label and Version
+    History signals. Pass `doc` to reuse an already-open Document instead of
+    parsing the same file a second time.
+    """
     signals = {
         "title": None,
         "header": None,
         "header_name": None,
         "header_version": None,
         "header_missing_tab": False,
+        "header_missing_version": False,
+        "footer_label": None,
         "history_version": None,
         "history_description": None,
         "table_format": None,  # "new", "legacy", None (unrecognized/empty)
         "error": None,
     }
     try:
-        d = docx.Document(full_path)
+        d = doc if doc is not None else docx.Document(full_path)
         # First NON-EMPTY paragraph: a blank line at the top of the body used
         # to make the title read as "", which silently dropped it out of the
         # four-source name comparison (turning it into a three-source one).
@@ -461,41 +559,9 @@ def read_docx_signals(full_path):
         if title_para is not None:
             signals["title"] = title_para.text.strip()
 
-        hdr_paragraphs = [p.text for p in d.sections[0].header.paragraphs if p.text.strip()]
-        if hdr_paragraphs:
-            hdr_text = hdr_paragraphs[0].strip()
-            signals["header"] = hdr_text
-            if "\t" in hdr_text:
-                signals["header_name"] = hdr_text.split("\t")[0].strip()
-                tail = hdr_text.split("\t")[-1].strip()
-                if tail.lower().startswith("v") and tail[1:2].isdigit():
-                    signals["header_version"] = tail[1:].strip()
-            else:
-                # no tab: only treated as "glued together" if it looks like
-                # name+version were concatenated (ends in something like
-                # "v1.2" with no separator before it)
-                # Require the version to be glued directly to a word character:
-                # "Namev1.2" is a broken header, but "Migracao Office v2" is a
-                # legitimate document name that merely ends in something
-                # version-shaped. Without the lookbehind, the latter produced a
-                # false "missing tab", a truncated name, and a phantom version.
-                m = re.search(r"(?<=\w)v\d+(\.\d+)?$", hdr_text.strip(), re.IGNORECASE)
-                if m:
-                    signals["header_missing_tab"] = True
-                    signals["header_version"] = m.group(0)[1:]
-                    # The regex already knows exactly where the version starts,
-                    # so the name is everything before it. Without this, the
-                    # name would keep the glued-on version ("Namev1.2") and the
-                    # SAME defect would be reported twice: once correctly as a
-                    # missing-tab header, and again as a bogus name divergence
-                    # whose recommendation would tell the person to propagate
-                    # the broken name to the other three sources.
-                    signals["header_name"] = hdr_text[: m.start()].strip()
-                else:
-                    # No tab and no trailing version: nothing to split off, the
-                    # whole header is the name.
-                    signals["header_name"] = hdr_text
-
+        # The Version History is read BEFORE the header, because deciding
+        # whether a trailing "v1.0" in the header is a glued-on version or part
+        # of the document's own name needs the version the document claims.
         if d.tables:
             last_table = d.tables[-1]
             if len(last_table.rows) >= 1:
@@ -514,6 +580,20 @@ def read_docx_signals(full_path):
                         signals["history_description"] = last_row[idx_description]
                 # format None: we don't try to extract anything — safer than
                 # risking comparing the wrong column (e.g. mistaking Date for Version).
+
+        # The footer's organization label, read here so the document is not
+        # opened a second time just to get one line of it.
+        try:
+            footer_line = "".join(p.text for p in d.sections[0].footer.paragraphs)
+        except (IndexError, AttributeError):
+            footer_line = ""
+        footer_label = footer_line.split("\t")[0].strip()
+        if footer_label:
+            signals["footer_label"] = footer_label
+
+        hdr_paragraphs = [p.text for p in d.sections[0].header.paragraphs if p.text.strip()]
+        if hdr_paragraphs:
+            _parse_header(signals, hdr_paragraphs[0].strip(), full_path)
     except Exception as e:
         signals["error"] = str(e)
     return signals
@@ -544,10 +624,18 @@ def read_tab_category_map(wb):
             if not row or not row[0]:
                 continue
             category = str(row[0]).strip()
-            reference = str(row[-1] or "")
-            m = re.search(r"'([^']+)'", reference)
-            if m:
-                mapping[m.group(1).strip()] = category
+            # Scan the row's cells from the right instead of trusting row[-1]:
+            # openpyxl pads every row out to the sheet's widest column, so a
+            # note typed into a column past "Tab" became the last cell, the
+            # quoted tab name was never seen, and the mapping was lost — which
+            # brought back exactly the false folder/tab mismatches on
+            # sanitized or truncated tab names that this mapping exists to
+            # prevent.
+            for value in reversed(row[1:]):
+                m = re.search(r"'([^']+)'", str(value or ""))
+                if m:
+                    mapping[m.group(1).strip()] = category
+                    break
     return mapping
 
 
@@ -583,9 +671,9 @@ def resolve_font_property(run, paragraph, prop):
     CONSERVATIVE mode we never call that a violation; it goes to the
     "could not verify" bucket instead.
     """
-    def read(source_font, from_run):
+    def read(source_font):
         if prop == "bold":
-            return source_font.bold if not from_run else source_font.bold
+            return source_font.bold
         if prop == "size":
             return source_font.size
         if prop == "color":
@@ -598,7 +686,9 @@ def resolve_font_property(run, paragraph, prop):
                 return None
         return None
 
-    value = read(run.font, True) if prop != "bold" else run.bold
+    # run.bold is python-docx's own resolved view of the run's bold, so it is
+    # preferred over reading the font directly for that one property.
+    value = run.bold if prop == "bold" else read(run.font)
     if value is not None:
         return value, True
 
@@ -606,7 +696,7 @@ def resolve_font_property(run, paragraph, prop):
         font = getattr(style, "font", None)
         if font is None:
             continue
-        value = read(font, False)
+        value = read(font)
         if value is not None:
             return value, True
 
@@ -699,16 +789,13 @@ def _footer_signals(doc):
     return text, has_tab, has_page_field
 
 
-def check_document_structure(full_path, label):
+def check_document_structure(d, label):
     """
     Checks Section 3: required sections present, in order, with Version History
-    last. Returns a list of issues.
+    last. Takes an already-open Document; the caller reports an unreadable file
+    once, on its own, rather than letting it surface here as a structure
+    violation too.
     """
-    try:
-        d = docx.Document(full_path)
-    except Exception as e:
-        return ["%s: couldn't open the file for structure checks (%s)" % (label, e)]
-
     issues = []
     headings = []
     for p in d.paragraphs:
@@ -751,24 +838,20 @@ def check_document_structure(full_path, label):
     return issues
 
 
-def check_document_formatting(full_path, label):
+def check_document_formatting(d, label):
     """
-    Checks a .docx against the formatting constants above (Section 4 of the
-    spec), in CONSERVATIVE mode: something is only reported as a violation when
-    an explicit, divergent value was actually found. Anything the cascade can't
-    settle is returned separately as "could not verify" and never counted as a
-    problem — a checker that guesses produces false positives, and a formatting
-    report nobody trusts is worse than no report at all.
+    Checks an already-open Document against the formatting constants above
+    (Section 4 of the spec), in CONSERVATIVE mode: something is only reported as
+    a violation when an explicit, divergent value was actually found. Anything
+    the cascade can't settle is returned separately as "could not verify" and
+    never counted as a problem — a checker that guesses produces false
+    positives, and a formatting report nobody trusts is worse than no report at
+    all.
 
     Returns (violations, unverifiable), both lists of strings.
     """
     violations = []
     unverifiable = []
-
-    try:
-        d = docx.Document(full_path)
-    except Exception as e:
-        return [f"{label}: couldn't open the file for formatting checks ({e})"], []
 
     # --- margins (always determinable: they're stored on the section) ---
     for section in d.sections:
@@ -985,7 +1068,7 @@ def resolve_missing_master_list(base_dir):
     print(f"No master-index spreadsheet found in '{base_dir}'.")
     print(f"(looked for: {', '.join(MASTER_LIST_NAME_PATTERNS)})\n")
 
-    if not sys.stdin.isatty():
+    def print_guidance():
         print(
             "Running non-interactively, so I won't prompt. Either:\n\n"
             "  1) generate one from the files already in the base:\n"
@@ -993,6 +1076,13 @@ def resolve_missing_master_list(base_dir):
             "  2) or point at an existing spreadsheet:\n"
             f"       python3 check_master_list.py \"{base_dir}\" \"<file name>.xlsx\"\n"
         )
+
+    # isatty() is necessary but not sufficient: on Windows, stdin redirected
+    # from NUL is reported as a TERMINAL, so a cron/CI/pipeline run took the
+    # interactive path below and died on its first prompt instead of printing
+    # this guidance. An immediate EOF is therefore treated the same way.
+    if not sys.stdin.isatty():
+        print_guidance()
         return None, False
 
     print("What would you like to do?")
@@ -1002,32 +1092,60 @@ def resolve_missing_master_list(base_dir):
 
     try:
         choice = input("> ").strip()
-    except (EOFError, KeyboardInterrupt):
+    except EOFError:
+        print_guidance()
+        return None, False
+    except KeyboardInterrupt:
         print("\nAborted.")
         return None, False
 
     if choice == "1":
         try:
-            from bootstrap_master_list import bootstrap
+            from bootstrap_master_list import bootstrap, HEADERS, STATUS_IN_REVIEW
         except ImportError as e:
             print(f"Couldn't load bootstrap_master_list.py ({e}).")
             return None, False
-        print(
-            "\nHeads-up: every row will be written with Status 'Em revisão', and any\n"
-            "document whose file name has no KB code will be left with '—' instead of\n"
-            "a new code — codes are never recycled, so that choice stays with you.\n"
-        )
+
         # Ask which language the base is authored in. Defaulting silently to
         # English would write an index whose column headers and status values
         # don't match the documents it indexes.
-        print("What language are this base's documents written in?")
-        print("  [1] English (default)")
-        print("  [2] Another language — give its two-letter code")
+        #
+        # Offer only what actually exists: the old prompt invited "another
+        # language — give its two-letter code", then died on HEADERS[lang] for
+        # anything but en/pt and surfaced it as a bare "ERROR: 'fr'". The CLI's
+        # --lang has always validated; this path did not.
+        supported = sorted(HEADERS)
+        print("\nWhat language are this base's documents written in?")
+        for i, code in enumerate(supported, 1):
+            print("  [%d] %s%s" % (i, code, "  (default)" if code == "en" else ""))
         try:
-            lang_choice = input("> ").strip() or "1"
-            lang = "en"
-            if lang_choice == "2":
-                lang = input("Language code: ").strip().lower()
+            answer = (input("> ").strip().lower() or "en")
+        except (EOFError, KeyboardInterrupt):
+            print("\nAborted.")
+            return None, False
+        if answer.isdigit() and 1 <= int(answer) <= len(supported):
+            lang = supported[int(answer) - 1]
+        elif answer in HEADERS:
+            lang = answer
+        else:
+            print(
+                "Unsupported language %r. Supported: %s. To add one, extend the "
+                "HEADERS/OVERVIEW_HEADERS/STATUS_* tables in "
+                "bootstrap_master_list.py. Nothing was written."
+                % (answer, ", ".join(supported))
+            )
+            return None, False
+
+        # The label shown here has to be the one that will actually be written:
+        # this message used to name the Portuguese status regardless of the
+        # language chosen.
+        print(
+            "\nHeads-up: every row will be written with Status '%s', and any\n"
+            "document whose file name has no KB code will be left with '%s' instead of\n"
+            "a new code — codes are never recycled, so that choice stays with you.\n"
+            % (STATUS_IN_REVIEW[lang], NO_CODE_MARKER)
+        )
+        try:
             confirm = input("Proceed? [y/N] ").strip().lower()
         except (EOFError, KeyboardInterrupt):
             print("\nAborted.")
@@ -1108,6 +1226,8 @@ def check(base_dir, master_list_name=None):
     version_divergence_issues = []
     legacy_table_issues = []
     header_missing_tab_issues = []
+    header_missing_version_issues = []
+    unreadable_document_issues = []
     formatting_issues = []
     formatting_unverifiable = []
     structure_issues = []
@@ -1225,7 +1345,32 @@ def check(base_dir, master_list_name=None):
                 continue  # only .docx has a title/header/history to compare
 
             label = f"[{sheet_name}] {codigo}"
-            fmt_violations, fmt_unverifiable = check_document_formatting(full_path, label)
+
+            # Open the document ONCE and share it with every check. It used to
+            # be parsed four times per row (signals, structure, formatting, and
+            # again for the footer label). Opening it up front also means an
+            # unreadable file is reported once, under its own heading: before,
+            # a single corrupt .docx produced THREE findings — a broken
+            # reference (claiming a file that plainly exists doesn't), a
+            # structure violation and a formatting violation.
+            try:
+                document = docx.Document(full_path)
+            except Exception as e:
+                unreadable_document_issues.append(
+                    f"{label} ('{documento}'): '{arquivo}' exists but couldn't be "
+                    f"opened as a Word document ({e}). Nothing about it was checked."
+                )
+                continue
+
+            signals = read_docx_signals(full_path, doc=document)
+            if signals["error"]:
+                unreadable_document_issues.append(
+                    f"{label} ('{documento}'): '{arquivo}' opened, but its contents "
+                    f"couldn't be read ({signals['error']}). Nothing about it was checked."
+                )
+                continue
+
+            fmt_violations, fmt_unverifiable = check_document_formatting(document, label)
             formatting_issues.extend(fmt_violations)
             formatting_unverifiable.extend(fmt_unverifiable)
             # Legacy documents are, by definition, the ones that predate the
@@ -1233,21 +1378,13 @@ def check(base_dir, master_list_name=None):
             # flood the report with findings nobody intends to fix, which is
             # exactly the failure the conservative mode exists to avoid.
             if str(status or "").strip().lower() not in LEGACY_STATUS_LABELS:
-                structure_issues.extend(check_document_structure(full_path, label))
+                structure_issues.extend(check_document_structure(document, label))
 
-            # Collect the footer's organization label. It can't be validated in
+            # The footer's organization label. It can't be validated in
             # isolation (the script doesn't know the base's label), but every
             # document in one base must carry the SAME one.
-            try:
-                footer_doc = docx.Document(full_path)
-                footer_line = "".join(
-                    p.text for p in footer_doc.sections[0].footer.paragraphs
-                )
-                prefix = footer_line.split("\t")[0].strip()
-                if prefix:
-                    footer_labels.setdefault(prefix, []).append(codigo)
-            except Exception:
-                pass
+            if signals["footer_label"]:
+                footer_labels.setdefault(signals["footer_label"], []).append(codigo)
 
             # Folder/tab mismatch. The File column stores only the bare name
             # precisely because the tab is supposed to imply the folder; if the
@@ -1266,13 +1403,6 @@ def check(base_dir, master_list_name=None):
                     f"'{expected_label}', but the file is in folder '{folder}'. "
                     "Either move the file or move the row."
                 )
-
-            signals = read_docx_signals(full_path)
-            if signals["error"]:
-                broken_reference_issues.append(
-                    f"[{sheet_name}] {codigo}: couldn't open '{arquivo}' ({signals['error']})"
-                )
-                continue
 
             # 3a) Version History table in the legacy format (no real semantic
             # version column) — reported as its own item, instead of producing
@@ -1297,6 +1427,26 @@ def check(base_dir, master_list_name=None):
                     "Action needed: fix the header to the format "
                     "'KB-XXX - <Document Name><TAB>v<Version>', with a real tab character "
                     "separating the name from the version."
+                )
+
+            # 3c) header that carries no version at all. Section 4 requires one
+            # in every header, but an ABSENT version used to be invisible: the
+            # version comparison below drops empty sources before comparing, so
+            # {None, "1.0", "1.0"} collapsed to a single value and reported
+            # nothing. A header with no version is exactly the case where the
+            # "header must match the Version History" rule silently stops being
+            # enforceable.
+            if signals["header"] is None:
+                header_missing_version_issues.append(
+                    f"{label} ('{documento}'): the document has no header at all. "
+                    "Section 4 requires 'KB-XXX - <Document Name><TAB>v<Version>'."
+                )
+            elif signals["header_missing_version"]:
+                header_missing_version_issues.append(
+                    f"{label} ('{documento}'): the header carries no version "
+                    f"(found: '{signals['header']}'). Section 4 requires "
+                    "'KB-XXX - <Document Name><TAB>v<Version>', and that version must "
+                    "match the last row of the Version History."
                 )
 
             file_name = strip_code_prefix(os.path.splitext(os.path.basename(arquivo))[0])
@@ -1385,7 +1535,11 @@ def check(base_dir, master_list_name=None):
         for path in paths:
             if is_inside_attachment_folder(path):
                 continue  # attachment of a KB document, not a standalone indexable item
-            if path not in referenced_files and basename not in referenced_files:
+            # Resolved paths only. The old `or basename not in referenced_files`
+            # fallback could never fire (a bare name only enters the set for a
+            # root-level file, which by then has no unindexed twin) and
+            # re-opened the very hole 0.8.1 closed.
+            if path not in referenced_files:
                 orphan_file_issues.append(f"'{path}' exists in the base, but isn't in any master-index row")
 
     if sheets_without_header:
@@ -1410,7 +1564,10 @@ def check(base_dir, master_list_name=None):
     section("Name divergence (file/title/header/master-index spreadsheet)", name_divergence_issues)
     section("Version divergence (header/history/master-index spreadsheet)", version_divergence_issues)
     section("Version History table in the legacy format", legacy_table_issues)
-    section("Header missing the tab separator (name and version glued together)", header_missing_tab_issues)
+    section("Header missing the tab separator (name and version glued or space-separated)", header_missing_tab_issues)
+    section("Header missing its version (Section 4)", header_missing_version_issues)
+    section("Unreadable documents (the file exists but cannot be parsed)",
+            unreadable_document_issues)
     if len(footer_labels) > 1:
         detail = ["the base uses more than one footer label; every document must carry the same one:"]
         for prefix, codes in sorted(footer_labels.items()):
@@ -1462,6 +1619,8 @@ def check(base_dir, master_list_name=None):
         + len(version_divergence_issues)
         + len(legacy_table_issues)
         + len(header_missing_tab_issues)
+        + len(header_missing_version_issues)
+        + len(unreadable_document_issues)
         + len(formatting_issues)
         + len(structure_issues)
         + len(folder_mismatch_issues)

@@ -1,0 +1,70 @@
+A conforming base must come back clean and exit 0.
+
+$ python skills/kb-compiler/scripts/bootstrap_master_list.py "<clean base>"
+
+
+Created: C:/Users/Lucas/AppData/Local/Temp/tmp.gAgHR57pcJ/clean\Master List - clean.xlsx
+Registered in .kb-compiler.json — later runs will use this file.
+1 document(s) across 1 category tab(s).
+
+Every row was written with Status = 'In review' — none of them has been reviewed yet.
+
+Next step: review the spreadsheet, then run check_master_list.py against the base.
+
+$ python skills/kb-compiler/scripts/check_master_list.py "<clean base>"
+
+Base: C:/Users/Lucas/AppData/Local/Temp/tmp.gAgHR57pcJ/clean
+Master-index spreadsheet: Master List - clean.xlsx
+
+=== Broken references (master-index spreadsheet → file) (0) ===
+No problems found.
+
+=== Orphaned files (file → master-index spreadsheet) (0) ===
+No problems found.
+
+=== Duplicate/shared codes (0) ===
+No problems found.
+
+=== Name divergence (file/title/header/master-index spreadsheet) (0) ===
+No problems found.
+
+=== Version divergence (header/history/master-index spreadsheet) (0) ===
+No problems found.
+
+=== Version History table in the legacy format (0) ===
+No problems found.
+
+=== Header missing the tab separator (name and version glued or space-separated) (0) ===
+No problems found.
+
+=== Header missing its version (Section 4) (0) ===
+No problems found.
+
+=== Unreadable documents (the file exists but cannot be parsed) (0) ===
+No problems found.
+
+=== Structure violations (Section 3 of the standard) (0) ===
+No problems found.
+
+=== Ambiguous file reference (same name in several folders) (0) ===
+No problems found.
+
+=== Folder/tab mismatch (0) ===
+No problems found.
+
+=== Formatting violations (Section 4 of the standard) (0) ===
+No problems found.
+
+--- Informational: formatting properties that could not be verified (0) ---
+These are NOT violations. The property simply isn't stated on the run or anywhere in
+its style chain, so its effective value comes from Word's defaults and can't be
+confirmed programmatically. Check visually if a specific document looks off.
+
+--- Informational: files with a non-ASCII character in the name (0) ---
+This is NOT a base consistency problem — it's only a portability note.
+Accented characters in file names work normally here; they'd only break if the base were
+ever exported to a system that doesn't handle Unicode well. Nothing to fix now.
+
+SUMMARY: 0 problem(s) found. No file was changed by this script.
+
+exit code: 0

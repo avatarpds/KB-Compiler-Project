@@ -25,7 +25,7 @@ a guess. This script therefore:
 - skips attachment folders (see ATTACHMENT_DIR_SUFFIXES in check_master_list).
 
 Usage:
-    python3 bootstrap_master_list.py <base_path> [--lang en|pt|...] [--owner "Name"] [--output PATH.xlsx] [--force]
+    python3 bootstrap_master_list.py <base_path> [--lang en|pt] [--owner "Name"] [--output PATH.xlsx] [--force]
 """
 
 import datetime
@@ -33,6 +33,13 @@ import glob
 import os
 import re
 import sys
+
+# Same reason as in check_master_list.py: this script's notes contain "—" and
+# accented file names, and Windows would fail to encode them the moment output
+# is redirected or piped.
+for _stream in (sys.stdout, sys.stderr):
+    if hasattr(_stream, "reconfigure"):
+        _stream.reconfigure(encoding="utf-8", errors="replace")
 
 try:
     import openpyxl
@@ -42,7 +49,6 @@ except ImportError:
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from check_master_list import (  # noqa: E402
-    ATTACHMENT_DIR_SUFFIXES,
     CONFIG_FILENAME,
     is_master_list_filename,
     MASTER_LIST_NAME_PATTERNS,
@@ -161,13 +167,19 @@ def build_row(base_dir, abs_path, file_value, is_legacy, notes):
     }
 
 
-def scan(base_dir, lang="en"):
+def scan(base_dir, lang="en", exclude=()):
     """
     Walks the base and returns {category: [row_dict, ...]} plus a list of notes
     about what could not be determined.
+
+    `exclude` holds absolute paths to leave out — the master index itself, above
+    all. A custom-named index (--output "Internal Index.xlsx") is not matched by
+    MASTER_LIST_NAME_PATTERNS and .xlsx is indexable, so a re-run with --force
+    used to index the index as if it were one of the base's documents.
     """
     categories = {}
     notes = []
+    excluded = {os.path.abspath(p) for p in exclude}
 
     # Root-level documents first, so they head the index and are easy to file.
     root_rows = []
@@ -181,6 +193,8 @@ def scan(base_dir, lang="en"):
             continue
         if is_master_list_filename(nfc(fname)):
             continue
+        if os.path.abspath(abs_path) in excluded:
+            continue
         row = build_row(base_dir, abs_path, nfc(fname), is_legacy=False, notes=notes)
         notes.append(
             f"{nfc(fname)}: sits in the base root, so it has no category — indexed under "
@@ -188,7 +202,7 @@ def scan(base_dir, lang="en"):
         )
         root_rows.append(row)
     if root_rows:
-        categories[UNCATEGORIZED[lang]] = root_rows
+        categories.setdefault(UNCATEGORIZED[lang], []).extend(root_rows)
 
     for entry in sorted(os.listdir(base_dir)):
         full = os.path.join(base_dir, entry)
@@ -210,13 +224,27 @@ def scan(base_dir, lang="en"):
                     continue
                 if fname.startswith("~$"):  # Office lock file
                     continue
+                if os.path.abspath(abs_path) in excluded:
+                    continue
 
                 # The checker expects the full relative path only for Legacy.
                 file_value = rel_to_base if is_legacy else nfc(fname)
                 rows.append(build_row(base_dir, abs_path, file_value, is_legacy, notes))
 
         if rows:
-            categories[category] = rows
+            # setdefault/extend, never assignment: two folders can strip to the
+            # same category name ("01 - Rede" and "02 - Rede"), and assigning
+            # silently dropped every document of whichever folder was scanned
+            # first — they then surfaced as orphans in the checker's report,
+            # with nothing in this script's output saying they had been lost.
+            if category in categories:
+                notes.append(
+                    "folder '%s' strips to the category name '%s', which another "
+                    "folder already uses; their documents were merged into one tab. "
+                    "Rename one of the folders if they are meant to be separate "
+                    "categories." % (entry, category)
+                )
+            categories.setdefault(category, []).extend(rows)
 
     return categories, notes
 
@@ -246,7 +274,7 @@ def build_workbook(categories, lang, owner=""):
         status_col = "D"
         # Wide fixed range: a range ending at the current row count went
         # stale the moment anyone appended a row.
-        first, last = 3, 1000
+        first, last = 3, 10000
         quoted = f"'{sheet}'"
         active_label = "Ativo" if lang == "pt" else "Active"
         review_label = STATUS_IN_REVIEW[lang]
@@ -306,7 +334,14 @@ def choose_target(base_dir, lang):
 
     try:
         choice = input("> ").strip() or "1"
-    except (EOFError, KeyboardInterrupt):
+    except EOFError:
+        # Nobody to answer, despite isatty() saying otherwise — which is what
+        # Windows reports when stdin is redirected from NUL. Fall back to the
+        # same default the non-interactive path above uses, instead of
+        # aborting a run that asked for nothing unusual.
+        print("(no input available — using the default)")
+        return default
+    except KeyboardInterrupt:
         print("\nAborted.")
         return None
 
@@ -371,7 +406,8 @@ def bootstrap(base_dir, lang="en", owner="", force=False, quiet=False, target=No
             "only if you really mean to replace it, and delete the other file first."
         )
 
-    categories, notes = scan(base_dir, lang)
+    # Never index the index. `existing` already holds any configured path.
+    categories, notes = scan(base_dir, lang, exclude=[target] + existing)
     if not categories:
         raise RuntimeError(
             f"No indexable document ({', '.join(INDEXABLE_EXTENSIONS)}) found under "

@@ -50,14 +50,18 @@ EXPECTED = {
     "Name divergence": 3,            # KB-010, KB-034 (blank first paragraph), KB-009 (duplicate row)
     "Version divergence": 1,         # KB-017 header/history mismatch
     "Version History table in the legacy format": 1,   # KB-020
-    "Header missing the tab separator": 1,             # KB-011
+    # KB-011 (glued: "YubiKeyv1.0") + KB-046 (spaced: "Nome Colado v1.0")
+    "Header missing the tab separator": 2,
+    "Header missing its version": 1,   # KB-037: "... Office v2", no version at all
+    "Unreadable documents": 1,         # KB-048: .docx extension, not a Word file
     # KB-030 (4 margins + size + color), KB-031 (shading + color), KB-040
     # (landscape + no footer), KB-041 (en dash), KB-042 (2 non-list sections),
     # KB-043 (all-caps author), plus one base-level footer-label mismatch.
     "Formatting violations": 15,
     "Structure violations": 2,       # KB-036: missing Prerequisites + history not last
     "Folder/tab mismatch": 2,        # KB-035 (planted) + KB-009's duplicate row
-    "Ambiguous file reference": 0,   # the tab resolves KB-045; nothing stays ambiguous
+    # KB-045 is resolved by its tab; KB-047's two copies are not.
+    "Ambiguous file reference": 1,
 }
 EXPECTED_UNVERIFIABLE = 3   # KB-032's second title run: bold, size, color
 EXPECTED_TOTAL = sum(EXPECTED.values())
@@ -67,7 +71,12 @@ def run(args):
     return subprocess.run(
         [sys.executable] + args,
         capture_output=True, text=True, timeout=TIMEOUT,
-        stdin=subprocess.DEVNULL,
+        # A real empty pipe, NOT subprocess.DEVNULL: on Windows stdin redirected
+        # from NUL is reported as a terminal by isatty(), so DEVNULL made every
+        # script under test take the INTERACTIVE path — 7 of these 12 groups
+        # failed for that reason alone, on the only OS the author runs.
+        input="",
+        encoding="utf-8",
     )
 
 
@@ -120,10 +129,9 @@ def test_detections(tmp):
     total = int(m.group(1)) if m else None
     if total != EXPECTED_TOTAL:
         failures.append("SUMMARY total: expected %d, got %s" % (EXPECTED_TOTAL, total))
-    # The "could not verify" bucket must never inflate the problem count —
-    # that separation is the whole point of conservative mode.
-    if total is not None and total != sum(EXPECTED.values()):
-        failures.append("unverifiable items leaked into the problem count")
+    # The per-section counts above already sum to EXPECTED_TOTAL, so comparing
+    # the summary against sum(EXPECTED.values()) a second time could never fail
+    # independently — it only looked like an extra assertion.
 
     if proc.returncode != 1:
         failures.append("exit code with problems: expected 1, got %d" % proc.returncode)
@@ -534,6 +542,100 @@ def test_root_level_documents_are_indexed(tmp):
     return failures
 
 
+def _fixture_doc(tmp):
+    """A known-good document from the detections fixture, to copy around."""
+    return os.path.join(tmp, "detections", "01 - Identity and Access",
+                        "KB-009 - Configurar MFA.docx")
+
+
+def test_colliding_category_names(tmp):
+    """
+    Two folders that strip to the same category name must not lose one of them.
+    Assigning instead of merging silently dropped every document of whichever
+    folder was scanned first; the checker then reported them as orphans, with
+    nothing in the bootstrap's output saying they had been lost.
+    """
+    base = os.path.join(tmp, "collide")
+    for folder, name in (("01 - Rede", "KB-001 - Um.docx"),
+                         ("02 - Rede", "KB-002 - Dois.docx")):
+        os.makedirs(os.path.join(base, folder), exist_ok=True)
+        shutil.copy(_fixture_doc(tmp), os.path.join(base, folder, name))
+
+    proc = run([BOOTSTRAP, base])
+    if proc.returncode != 0:
+        return ["bootstrap failed (rc=%d)" % proc.returncode]
+
+    failures = []
+    if "strips to the category name" not in proc.stdout:
+        failures.append("merging two folders into one tab wasn't reported to the user")
+
+    sheets = [f for f in os.listdir(base) if f.lower().endswith(".xlsx")]
+    wb = openpyxl.load_workbook(os.path.join(base, sheets[0]))
+    indexed = [str(row[2]) for name in wb.sheetnames[1:]
+               for row in list(wb[name].iter_rows(values_only=True))[2:]
+               if row and row[0]]
+    for expected in ("KB-001 - Um.docx", "KB-002 - Dois.docx"):
+        if expected not in indexed:
+            failures.append("'%s' was dropped from the index entirely" % expected)
+
+    count = match_section(parse_sections(run([CHECKER, base]).stdout), "Orphaned files")
+    if count:
+        failures.append("colliding category names left %s orphan(s)" % count)
+    return failures
+
+
+def test_overview_extra_column(tmp):
+    """
+    A note typed into a column past "Tab" must not hide the Overview's
+    category -> tab mapping. Reading only the row's LAST cell lost it, which
+    brought back the false folder/tab mismatches on truncated tab names that
+    the mapping exists to prevent.
+    """
+    base = os.path.join(tmp, "overviewextra")
+    folder = "01 - Identity Access and Corporate Governance Board"
+    os.makedirs(os.path.join(base, folder))
+    shutil.copy(_fixture_doc(tmp), os.path.join(base, folder, "KB-001 - One.docx"))
+
+    if run([BOOTSTRAP, base]).returncode != 0:
+        return ["bootstrap failed"]
+
+    sheets = [f for f in os.listdir(base) if f.lower().endswith(".xlsx")]
+    path = os.path.join(base, sheets[0])
+    wb = openpyxl.load_workbook(path)
+    ov = wb[wb.sheetnames[0]]
+    ov.cell(row=3, column=7, value="note typed by a human")
+    wb.save(path)
+
+    count = match_section(parse_sections(run([CHECKER, base]).stdout), "Folder/tab mismatch")
+    if count:
+        return ["an extra Overview column produced %s false mismatch(es)" % count]
+    return []
+
+
+def test_force_does_not_index_the_index(tmp):
+    """
+    A custom-named index is still an .xlsx sitting in the base, and .xlsx is
+    indexable — so a --force re-run used to add the index to itself as if it
+    were one of the base's documents.
+    """
+    base = os.path.join(tmp, "forceindex")
+    os.makedirs(os.path.join(base, "01 - Cat"))
+    shutil.copy(_fixture_doc(tmp), os.path.join(base, "01 - Cat", "KB-001 - One.docx"))
+
+    if run([BOOTSTRAP, base, "--output", "Internal Index.xlsx"]).returncode != 0:
+        return ["bootstrap with --output failed"]
+    if run([BOOTSTRAP, base, "--output", "Internal Index.xlsx", "--force"]).returncode != 0:
+        return ["bootstrap --force failed"]
+
+    wb = openpyxl.load_workbook(os.path.join(base, "Internal Index.xlsx"))
+    indexed = [str(row[2]) for name in wb.sheetnames[1:]
+               for row in list(wb[name].iter_rows(values_only=True))[2:]
+               if row and row[0]]
+    if any("Internal Index" in f for f in indexed):
+        return ["the master index indexed itself: %s" % indexed]
+    return []
+
+
 TESTS = [
     ("detections", test_detections),
     ("bootstrap", test_bootstrap),
@@ -547,6 +649,9 @@ TESTS = [
     ("custom destination remembered", test_custom_destination_is_remembered),
     ("out-of-base destination", test_out_of_base_destination),
     ("root-level documents indexed", test_root_level_documents_are_indexed),
+    ("colliding category names", test_colliding_category_names),
+    ("Overview extra column", test_overview_extra_column),
+    ("--force never indexes the index", test_force_does_not_index_the_index),
 ]
 
 
@@ -554,6 +659,16 @@ def main():
     tmp = tempfile.mkdtemp(prefix="kb-tests-")
     all_failures = {}
     try:
+        # Most groups below copy a document out of the detections fixture, so
+        # build it ONCE up front and stop here if it can't be built. Letting
+        # them run anyway made a broken builder show up as a dozen
+        # FileNotFoundErrors pointing at the wrong file.
+        built = run([BUILDER, os.path.join(tmp, "detections")])
+        if built.returncode != 0:
+            print("[FAIL] fixture build (rc=%d): %s"
+                  % (built.returncode, built.stderr.strip()[:400]))
+            return 1
+
         for name, fn in TESTS:
             try:
                 failures = fn(tmp)
