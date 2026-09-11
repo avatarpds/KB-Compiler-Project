@@ -1,0 +1,15 @@
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# Per-base config written by bootstrap_master_list.py — belongs to a base,
+# never to this repository.
+.kb-compiler.json
+
+# Generated indexes and Office lock files, in case a base is ever inspected here
+*.xlsx
+~$*
+
+.DS_Store
+Thumbs.db
