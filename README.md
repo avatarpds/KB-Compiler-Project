@@ -78,7 +78,9 @@ What it reports:
 | Name divergence | File name, title, header and spreadsheet disagreeing |
 | Version divergence | Header, Version History and spreadsheet disagreeing |
 | Legacy version table | A Version History still in the old column format |
-| Header missing tab | Name and version glued together (`Namev1.2`) |
+| Header missing tab | Name and version glued together (`Namev1.2`), or separated by a space where a tab belongs (`Name v1.2`) |
+| Header missing its version | A header with no version at all, which is the case where the "header must match the Version History" rule silently stops being enforceable |
+| Unreadable documents | A file the spreadsheet points at that exists but cannot be parsed as a Word document |
 | Structure violations | A required Section 3 heading missing, out of order, or content after Version History |
 | Folder/tab mismatch | A row on one category tab whose file physically lives in another folder |
 | Formatting violations | Margins, page orientation, title size/weight/color, non-native heading styles, callout shading and text color, footer presence and page fields, hyphen vs. dash in the header, bullet/numbered list formatting per section, all-caps author names, and a footer label that differs across the base |
@@ -99,7 +101,7 @@ To generate the spreadsheet directly:
 
 ```bash
 python3 skills/kb-compiler/scripts/bootstrap_master_list.py "<base path>" \
-    [--lang en|pt|...] [--owner "Name"] [--output PATH.xlsx] [--force]
+    [--lang en|pt] [--owner "Name"] [--output PATH.xlsx] [--force]
 ```
 
 Run in a terminal, it asks where the index should live: the default name inside the base, a different name inside the base, or a full path of your choosing (it may sit outside the base entirely). `--output` makes the same choice non-interactively. Whatever you pick is recorded in a small `.kb-compiler.json` in the base, so **every later run uses that same file** — the index becomes a continuous insertion point rather than something re-derived from a file-name pattern each time. A configured path that has gone missing is an explicit error, never a silent fallback to some other spreadsheet.
@@ -124,15 +126,15 @@ pip install -r skills/kb-compiler/scripts/requirements.txt
 python3 skills/kb-compiler/tests/run_tests.py
 ```
 
-Three groups:
+15 groups, in three families plus a growing set of named regressions:
 
-**Detections.** `build_fixture.py` builds a synthetic base with one deliberate instance of every problem the checker catches, plus cases that must stay clean: a fully conforming document; one whose formatting is inherited from its style rather than set on the run; attachment files that must never be flagged as orphans; an accented file name stored in NFD form. The suite compares every report section's count against the expected value.
+**Detections.** `build_fixture.py` builds a synthetic base with one deliberate instance of every problem the checker catches, plus cases that must stay clean: a fully conforming document; one whose formatting is inherited from its style rather than set on the run; a document written entirely in another language; a name that legitimately ends in something version-shaped (`... Office v2`); attachment files that must never be flagged as orphans; an accented file name stored in NFD form. The suite compares every report section's count against the expected value.
 
-**Bootstrap.** Verifies the generated spreadsheet is one the checker reads with zero broken references and zero orphans, that no row is written as reviewed, that no KB code is ever invented for a document whose file name doesn't already have one, and that a second run refuses to overwrite.
+**Bootstrap.** Verifies the generated spreadsheet is one the checker reads with zero broken references and zero orphans, that no row is written as reviewed, that no KB code is ever invented for a document whose file name doesn't already have one, that a second run refuses to overwrite, that two folders sharing a category name lose neither's documents, and that a `--force` re-run never indexes the index itself.
 
-**Non-interactive safety.** Verifies that a base with no spreadsheet prints guidance and exits `2` instead of blocking on input, and never falls back to a raw traceback.
+**Non-interactive safety.** Verifies that a base with no spreadsheet prints guidance and exits `2` instead of blocking on input, and never falls back to a raw traceback. Note the suite drives each script with a real empty pipe rather than `subprocess.DEVNULL`: on Windows, stdin redirected from `NUL` is reported as a *terminal* by `isatty()`, which used to send every script under test down the interactive path.
 
-Run this after any change to either script. A detection that silently stops working is the worst failure mode for an audit tool: the report comes back clean and you believe it. This suite has already caught regressions that manual testing missed, and grew twice after external reviews found bugs it didn't cover — including a fix that had turned a crash into a silent false positive. Every one of those cases now has a test.
+Run this after any change to either script. A detection that silently stops working is the worst failure mode for an audit tool: the report comes back clean and you believe it. This suite has already caught regressions that manual testing missed, and has grown after each external review — including a fix that had turned a crash into a silent false positive, and a report that crashed halfway through on Windows while still exiting with the "problems found" code. Every one of those cases now has a test.
 
 ## Requirements
 

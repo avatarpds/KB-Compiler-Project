@@ -1,0 +1,110 @@
+$ python skills/kb-compiler/scripts/check_master_list.py "<synthetic fixture>" > report.txt
+(output redirected to a FILE, which is the case that used to crash on Windows)
+
+Base: C:/Users/Lucas/AppData/Local/Temp/tmp.gAgHR57pcJ/fixture
+Master-index spreadsheet: Lista Mestra - Fixture.xlsx
+
+=== Broken references (master-index spreadsheet → file) (1) ===
+- [Identity and Access] KB-050 ('Arquivo Fantasma'): master-index spreadsheet points to 'KB-050 - Nao Existe.docx', which doesn't exist in the base.
+
+=== Orphaned files (file → master-index spreadsheet) (2) ===
+- '03 - Infrastructure/KB-045 - Guia Duplicado.docx' exists in the base, but isn't in any master-index row
+- '03 - Infrastructure/KB-099 - Nao Indexado.docx' exists in the base, but isn't in any master-index row
+
+=== Duplicate/shared codes (1) ===
+- Code 'KB-009' appears in 'Identity and Access' and in 'Infrastructure' (current document: 'Codigo Duplicado')
+
+=== Name divergence (file/title/header/master-index spreadsheet) (3) ===
+- [Identity and Access] KB-010: names diverge between sources:
+    - file name: 'Troca de Senha'
+    - title (document body): 'Reset de Senha'
+    - header: 'Troca de Senha'
+    - master-index spreadsheet (Document column): 'Troca de Senha'
+    Recommendation: use the MASTER-INDEX SPREADSHEET's name, since it was updated on 2026-09-15, after the file's last modification (2026-09-11)
+    Action needed: pick which of these variants becomes the official name and apply it in all 4 sources (file, title, header, master-index spreadsheet).
+    Note: applying that choice to all 4 sources is a content edit, not just a name change — it triggers the critical version rule (the header must always match the last row of the Version History). In other words, resolving this name divergence also requires bumping the document's version and adding a new row to the Version History describing the name standardization — otherwise fixing one inconsistency creates another.
+- [Infrastructure] KB-034: names diverge between sources:
+    - file name: 'Nome Do Header'
+    - title (document body): 'Nome Totalmente Diferente'
+    - header: 'Nome Do Header'
+    - master-index spreadsheet (Document column): 'Nome Do Header'
+    Recommendation: use the DOCUMENT's name (title/header), since the file was last modified on 2026-09-11, after the last update recorded in the master-index spreadsheet (2026-08-01)
+    Action needed: pick which of these variants becomes the official name and apply it in all 4 sources (file, title, header, master-index spreadsheet).
+    Note: applying that choice to all 4 sources is a content edit, not just a name change — it triggers the critical version rule (the header must always match the last row of the Version History). In other words, resolving this name divergence also requires bumping the document's version and adding a new row to the Version History describing the name standardization — otherwise fixing one inconsistency creates another.
+- [Infrastructure] KB-009: names diverge between sources:
+    - file name: 'Configurar MFA'
+    - title (document body): 'Configurar MFA'
+    - header: 'Configurar MFA'
+    - master-index spreadsheet (Document column): 'Codigo Duplicado'
+    Recommendation: use the DOCUMENT's name (title/header), since the file was last modified on 2026-09-11, after the last update recorded in the master-index spreadsheet (2026-08-01)
+    Action needed: pick which of these variants becomes the official name and apply it in all 4 sources (file, title, header, master-index spreadsheet).
+    Note: applying that choice to all 4 sources is a content edit, not just a name change — it triggers the critical version rule (the header must always match the last row of the Version History). In other words, resolving this name divergence also requires bumping the document's version and adding a new row to the Version History describing the name standardization — otherwise fixing one inconsistency creates another.
+
+=== Version divergence (header/history/master-index spreadsheet) (1) ===
+- [Infrastructure] KB-017: versions diverge between sources:
+    - header: '1.0'
+    - last row of Version History: '2.1'
+    - master-index spreadsheet (Version column): '1.0'
+    Action needed: align all 3 sources to the most recent version (usually the Version History's, since it's the audit record).
+
+=== Version History table in the legacy format (1) ===
+- [Infrastructure] KB-020 ('Movimentar Workstation'): the Version History table is in the old format (No. | Revision Date | Revision | Reviewer), which has no semantic-version column — just a revision counter. Action needed: convert the table to the new format (Author | Version | Date | Change Description).
+
+=== Header missing the tab separator (name and version glued or space-separated) (2) ===
+- [Identity and Access] KB-011 ('Configurar YubiKey'): the header has no tab separator between name and version (found: 'KB-011 - Configurar YubiKeyv1.0'). Action needed: fix the header to the format 'KB-XXX - <Document Name><TAB>v<Version>', with a real tab character separating the name from the version.
+- [Identity and Access] KB-046 ('Nome Colado'): the header has no tab separator between name and version (found: 'KB-046 - Nome Colado v1.0'). Action needed: fix the header to the format 'KB-XXX - <Document Name><TAB>v<Version>', with a real tab character separating the name from the version.
+
+=== Header missing its version (Section 4) (1) ===
+- [Infrastructure] KB-037 ('Migracao Office v2'): the header carries no version (found: 'KB-037 - Migracao Office v2'). Section 4 requires 'KB-XXX - <Document Name><TAB>v<Version>', and that version must match the last row of the Version History.
+
+=== Unreadable documents (the file exists but cannot be parsed) (1) ===
+- [Infrastructure] KB-048 ('Corrompido'): 'KB-048 - Corrompido.docx' exists but couldn't be opened as a Word document (Package not found at 'C:/Users/Lucas/AppData/Local/Temp/tmp.gAgHR57pcJ/fixture\03 - Infrastructure\KB-048 - Corrompido.docx'). Nothing about it was checked.
+
+=== Structure violations (Section 3 of the standard) (2) ===
+- [Infrastructure] KB-036: required section 'prerequisites' is missing (expected one of: pré-requisitos, pre-requisitos, prerequisites)
+- [Infrastructure] KB-036: Version History must be the last section, but 'Closing Notes' come after it
+
+=== Ambiguous file reference (same name in several folders) (1) ===
+- [Identity and Access] KB-047 ('Ambiguo'): the File column says 'KB-047 - Ambiguo.docx', but that name exists in 2 folders ('03 - Infrastructure/KB-047 - Ambiguo.docx', 'Legacy/KB-047 - Ambiguo.docx') and the row's tab doesn't single one out. Nothing about this document was checked. Use the full relative path in the File column, or rename one of the files.
+
+=== Folder/tab mismatch (2) ===
+- [Identity and Access] KB-035 ('Pasta Errada'): the row is filed under category 'Identity and Access', but the file is in folder '03 - Infrastructure'. Either move the file or move the row.
+- [Infrastructure] KB-009 ('Codigo Duplicado'): the row is filed under category 'Infrastructure', but the file is in folder '01 - Identity and Access'. Either move the file or move the row.
+
+=== Formatting violations (Section 4 of the standard) (15) ===
+- [Infrastructure] KB-030: top margin is 1.00in, expected 0.75in
+- [Infrastructure] KB-030: bottom margin is 1.00in, expected 0.75in
+- [Infrastructure] KB-030: left margin is 1.00in, expected 0.75in
+- [Infrastructure] KB-030: right margin is 1.00in, expected 0.75in
+- [Infrastructure] KB-030: title run 1 ('KB-030 - Formatacao Errada'): font size is 14.0pt, expected 22.0pt
+- [Infrastructure] KB-030: title run 1 ('KB-030 - Formatacao Errada'): font color is FF0000, expected 1F3864
+- [Infrastructure] KB-031: callout '⚠ Aviso' shading is CCCCCC, expected FFF3CD
+- [Infrastructure] KB-031: callout '⚠ Aviso' run 1 text color is 000000, expected 7B5C00
+- [Infrastructure] KB-040: page orientation is landscape, expected portrait
+- [Infrastructure] KB-040: the document has no footer; the standard requires '<Organization label>  |  Knowledge Base<TAB>Page <n> of <total>'
+- [Infrastructure] KB-041: the header uses '–' between code and name; the standard requires a plain hyphen '-'
+- [Infrastructure] KB-042: section 'prerequisites' is not formatted as a bulleted list
+- [Infrastructure] KB-042: section 'step by step' is not formatted as a numbered list
+- [Infrastructure] KB-043: Version History author 'LUCAS SOUZA' is in all caps; the standard requires Title Case
+- the base uses more than one footer label; every document must carry the same one:
+    - 'Another Team  |  Knowledge Base'  (KB-044)
+    - 'Fixture Team  |  Knowledge Base'  (KB-009, KB-010, KB-011, KB-045, ...)
+
+--- Informational: formatting properties that could not be verified (3) ---
+These are NOT violations. The property simply isn't stated on the run or anywhere in
+its style chain, so its effective value comes from Word's defaults and can't be
+confirmed programmatically. Check visually if a specific document looks off.
+- [Infrastructure] KB-032: title run 2 ('ulo Quebrado'): bold not stated on the run or its style chain
+- [Infrastructure] KB-032: title run 2 ('ulo Quebrado'): font size not stated on the run or its style chain
+- [Infrastructure] KB-032: title run 2 ('ulo Quebrado'): font color not stated on the run or its style chain
+
+--- Informational: files with a non-ASCII character in the name (1) ---
+This is NOT a base consistency problem — it's only a portability note.
+Accented characters in file names work normally here; they'd only break if the base were
+ever exported to a system that doesn't handle Unicode well. Nothing to fix now.
+- 03 - Infrastructure/KB-021 - Software Instalação.docx
+
+SUMMARY: 33 problem(s) found. No file was changed by this script.
+
+exit code: 1 (problems found, as expected for the fixture)
+bytes on stderr: 0

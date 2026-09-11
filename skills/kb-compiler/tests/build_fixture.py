@@ -361,6 +361,37 @@ def build(out):
         add_history(d, hist)
         d.save(os.path.join(folder, "KB-045 - Guia Duplicado.docx"))
 
+    # --- header with a SPACE where the tab belongs. Conforming in every other
+    # respect, so it must report exactly ONE problem (missing tab) — and must
+    # NOT be misreported as a name divergence, which is what used to happen:
+    # the recommendation then told you to propagate "Nome Colado v1.0" into the
+    # file name and the title.
+    d = new_doc()
+    d.sections[0].header.paragraphs[0].text = "KB-046 - Nome Colado v1.0"
+    add_title(d, "KB-046 - Nome Colado")
+    add_body_sections(d)
+    add_history(d, hist)
+    d.save(os.path.join(ident, "KB-046 - Nome Colado.docx"))
+
+    # --- POSITIVE test for the ambiguous-reference detection, which had only
+    # ever been asserted as zero. The row sits on the Identity tab while the
+    # only two copies live in Infrastructure and Legacy, so the tab singles out
+    # neither and nothing about the document may be checked.
+    for folder in (infra, legacy_dir):
+        d = new_doc()
+        d.sections[0].header.paragraphs[0].text = "KB-047 - Ambiguo\tv1.0"
+        add_title(d, "KB-047 - Ambiguo")
+        add_body_sections(d)
+        add_history(d, hist)
+        d.save(os.path.join(folder, "KB-047 - Ambiguo.docx"))
+
+    # --- a file with a .docx extension that is not a Word document (a renamed
+    # .doc, a truncated sync). It must count ONCE, under its own heading: it
+    # used to produce three findings — a broken reference claiming a file that
+    # plainly exists doesn't, plus a structure and a formatting violation.
+    with open(os.path.join(infra, "KB-048 - Corrompido.docx"), "wb") as f:
+        f.write(b"\xd0\xcf\x11\xe0 not a docx at all")
+
     # --- multilingual recognition: a fully conforming document whose section
     # headings and history columns are in another language (Portuguese here).
     # It must produce ZERO findings — if language recognition ever regressed,
@@ -406,6 +437,10 @@ def build(out):
             ("KB-035", "Pasta Errada", "KB-035 - Pasta Errada.docx", "Active", "1.0", BASE_DATE, BASE_DATE, "Lucas Souza"),
             # broken reference: file does not exist
             ("KB-050", "Arquivo Fantasma", "KB-050 - Nao Existe.docx", "Active", "1.0", BASE_DATE, BASE_DATE, "Lucas Souza"),
+            ("KB-046", "Nome Colado", "KB-046 - Nome Colado.docx", "Active", "1.0", BASE_DATE, BASE_DATE, "Lucas Souza"),
+            # ambiguous: the two copies are in Infrastructure and Legacy, so
+            # this tab singles out neither
+            ("KB-047", "Ambiguo", "KB-047 - Ambiguo.docx", "Active", "1.0", BASE_DATE, BASE_DATE, "Lucas Souza"),
         ],
         "Infrastructure": [
             ("KB-017", "Autopilot", "KB-017 - Autopilot.docx", "Active", "1.0", BASE_DATE, BASE_DATE, "Lucas Souza"),
@@ -426,6 +461,7 @@ def build(out):
             ("KB-043", "Autor Caixa Alta", "KB-043 - Autor Caixa Alta.docx", "Active", "1.0", BASE_DATE, BASE_DATE, "Lucas Souza"),
             ("KB-044", "Rodape Divergente", "KB-044 - Rodape Divergente.docx", "Active", "1.0", BASE_DATE, BASE_DATE, "Lucas Souza"),
             ("KB-039", "Documento em Portugues", "KB-039 - Documento em Portugues.docx", "Active", "1.0", BASE_DATE, BASE_DATE, "Lucas Souza"),
+            ("KB-048", "Corrompido", "KB-048 - Corrompido.docx", "Active", "1.0", BASE_DATE, BASE_DATE, "Lucas Souza"),
             # duplicate code: KB-009 already used in the other sheet
             ("KB-009", "Codigo Duplicado", "KB-009 - Configurar MFA.docx", "Active", "1.0", BASE_DATE, BASE_DATE, "Lucas Souza"),
         ],

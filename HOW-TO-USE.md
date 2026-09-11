@@ -8,6 +8,56 @@ skip to [Auditing without installing anything](#auditing-without-installing-anyt
 
 ---
 
+## 0. Prerequisites
+
+Two different things with different requirements — you may only need the first.
+
+**To use the plugin** (create, review and update documents by asking Claude):
+
+- The Claude desktop app, or Claude Code in a terminal.
+- Nothing else. No Python, no local clone, no command line.
+
+**To run the audit and bootstrap scripts yourself:**
+
+- **Python 3.7 or newer.** The scripts use nothing newer than 3.7 features;
+  they are developed and tested on 3.13. Check yours:
+
+  ```
+  python --version
+  ```
+
+  The command's name varies: `python` on Windows, `python3` on macOS and most
+  Linux distributions, and `py` on Windows when the Python launcher is
+  installed. Use whichever one answers, and substitute it for `python3` in
+  every command in this guide.
+
+- **pip**, which ships with Python:
+
+  ```
+  python -m pip --version
+  ```
+
+- **The two pinned packages**, installed once:
+
+  ```
+  pip install -r skills/kb-compiler/scripts/requirements.txt
+  ```
+
+  That is `python-docx==1.2.0`, which reads the `.docx` documents, and
+  `openpyxl==3.1.5`, which reads the `.xlsx` master index. The versions are
+  pinned on purpose: table and cell reading behavior changes between releases,
+  so an unpinned install can read a document differently than the test suite
+  expects.
+
+- **No write access is required to audit.** `check_master_list.py` never
+  modifies a file. Only `bootstrap_master_list.py` writes, and only the master
+  index plus a small `.kb-compiler.json` in the base.
+
+You do not need Microsoft Word, an Office licence, or any network access — the
+scripts read the files directly off disk.
+
+---
+
 ## 1. Install
 
 ### Claude desktop app (recommended)
@@ -234,6 +284,22 @@ marks them as legacy are skipped by the structure checks.
 
 **`ModuleNotFoundError`.** Install the pinned dependencies:
 `pip install -r skills/kb-compiler/scripts/requirements.txt`
+
+**Windows: "Python was not found" even though it is installed.** Windows ships
+an app-execution alias that intercepts `python3` and `py` and sends you to the
+Microsoft Store. Try plain `python` first. If that also fails, the alias is
+shadowing a real install: Settings → Apps → Advanced app settings → App
+execution aliases, and turn the Python entries off.
+
+**Windows: the script cannot find a file that is plainly there.** Python
+installed from the Microsoft Store runs in an app container that redirects
+`AppData\Roaming`. If your base lives under that path, use a copy somewhere
+else, or install Python from python.org instead of the Store.
+
+**The report stops after two lines, or the output file is truncated.** Fixed in
+0.8.4. On Windows, redirecting the report to a file made it crash on the first
+non-ASCII character in a section title — while still exiting with the code that
+means "problems found". Update the plugin.
 
 **The audit refuses to run with exit code 2.** Either the base has no master
 index (generate one with the bootstrap script), or it has more than one and the

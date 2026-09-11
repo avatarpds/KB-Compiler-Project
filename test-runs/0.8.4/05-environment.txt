@@ -1,0 +1,15 @@
+# Environment
+
+date (UTC):      2026-09-11 18:23:41
+platform:        Windows 11 (AMD64)
+python:          3.13.14 (tags/v3.13.14:fd17997, Jun 10 2026, 13:03:48) [MSC v.1944 64 bit (AMD64)]
+python-docx:     1.2.0
+openpyxl:        3.1.5
+shell:           Git Bash (no PYTHONIOENCODING, no PYTHONUTF8 set)
+locale encoding: cp1252
+PYTHONIOENCODING: None
+PYTHONUTF8:       None
+
+Pinned requirements:
+  python-docx==1.2.0
+  openpyxl==3.1.5

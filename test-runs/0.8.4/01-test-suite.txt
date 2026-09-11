@@ -1,0 +1,21 @@
+$ python skills/kb-compiler/tests/run_tests.py
+
+[ OK ] detections
+[ OK ] bootstrap
+[ OK ] non-interactive safety
+[ OK ] invalid sheet characters
+[ OK ] numbered legacy folder
+[ OK ] invalid --lang rejected
+[ OK ] ambiguous spreadsheet
+[ OK ] sanitized tab / no false mismatch
+[ OK ] legacy status skips structure
+[ OK ] custom destination remembered
+[ OK ] out-of-base destination
+[ OK ] root-level documents indexed
+[ OK ] colliding category names
+[ OK ] Overview extra column
+[ OK ] --force never indexes the index
+
+PASSED: 15 test groups, 13 detection sections, 33 problems, 3 unverifiable.
+
+exit code: 0
