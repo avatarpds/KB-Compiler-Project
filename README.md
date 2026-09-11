@@ -20,22 +20,30 @@ This helps anyone on the team create, review, or fix KB documents already follow
 
 ## Installing
 
+**Claude desktop app:** account menu (bottom left) → Settings → Plugins → Add.
+You get two options there.
+
+**Upload** is the most reliable path: download the release zip from
+[Releases](https://github.com/avatarpds/KB-Compiler-Project/releases) and upload
+it. This works even in organizations whose policy restricts which plugin
+marketplaces users may add.
+
+**Marketplace**, if your organization allows it — enter
+`https://github.com/avatarpds/KB-Compiler-Project`, or from a terminal:
+
 ```
 /plugin marketplace add avatarpds/KB-Compiler-Project
 /plugin install kb-compiler@kb-compiler
 ```
 
-The repository is both the plugin and its own single-plugin catalog, so those
-two commands are all it takes. Third-party marketplaces have auto-update
-disabled by default — run `/plugin marketplace update kb-compiler` to pick up
-later versions.
-
-If `/plugin` isn't available in your environment, use the plugin browser in the
-Claude desktop app, or declare the plugin under `enabledPlugins` in
-`.claude/settings.json`.
+Third-party marketplaces don't auto-update; run
+`/plugin marketplace update kb-compiler` to pick up later versions.
 
 The validation scripts are plain Python and run standalone, with or without the
 plugin installed — see below.
+
+**New here?** [HOW-TO-USE.md](HOW-TO-USE.md) walks through installing, creating
+your first document, and reading an audit report.
 
 ## How to use it
 

@@ -14,7 +14,13 @@ All notable changes to this project are documented here.
   ```
 
   Third-party marketplaces have auto-update disabled by default, so run
-  `/plugin marketplace update kb-compiler` to pick up later versions.
+  `/plugin marketplace update kb-compiler` to pick up later versions. Note that
+  a managed marketplace policy can block this path entirely; uploading the
+  release zip in the desktop app works regardless.
+
+- Added `HOW-TO-USE.md`: a walkthrough covering installation, base setup,
+  creating and ingesting documents, reading an audit report, and
+  troubleshooting.
 
 ## 0.8.1
 
