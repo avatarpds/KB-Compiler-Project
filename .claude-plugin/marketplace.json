@@ -1,0 +1,20 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-marketplace.json",
+  "name": "kb-compiler",
+  "owner": {
+    "name": "Lucas Souza"
+  },
+  "metadata": {
+    "description": "Documentation standard for IT knowledge bases, with a read-only audit script and test suite.",
+    "version": "0.8.1"
+  },
+  "plugins": [
+    {
+      "name": "kb-compiler",
+      "source": "./",
+      "description": "Documentation standard for a knowledge base (KB) — section structure, exact Word formatting, KB-XXX naming conventions, and a master-index spreadsheet — with a read-only audit script, a bootstrap script and a test suite.",
+      "category": "documentation",
+      "tags": ["documentation", "knowledge-base", "runbook", "audit"]
+    }
+  ]
+}
