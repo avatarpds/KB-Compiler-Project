@@ -148,19 +148,90 @@ except ImportError:
     sys.exit(2)
 
 
-# Overview/summary tab names to skip when scanning category tabs — matches
-# the Portuguese base this plugin was built for and the common English
-# equivalent.
-SKIP_SHEETS = {"Visão Geral", "Visao Geral", "Overview"}
+# ---------------------------------------------------------------------------
+# Language vocabulary. Every localized term lives in languages.json, NOT here.
+#
+# Section 10 of the standard says a base may be authored in any language, but
+# the code used to hardcode English and Portuguese across eight separate
+# tables — so "any language" actually meant "either of two, and only by editing
+# Python". The recognition sets below are now built by UNIONING every language
+# in that file, which is what lets one fixed script read a base in any of them.
+# Adding a language is a data edit; nothing here changes.
+# ---------------------------------------------------------------------------
+LANGUAGES_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "languages.json")
 
-# Master-index spreadsheet naming conventions to auto-detect, tried in order.
-MASTER_LIST_NAME_PATTERNS = ("Lista Mestra*.xlsx", "Master List*.xlsx", "Master Index*.xlsx")
+
+def load_languages(path=LANGUAGES_FILE):
+    """Returns {code: vocabulary}. A missing or broken file is fatal: guessing
+    the vocabulary would mean silently auditing against the wrong terms."""
+    try:
+        with open(path, encoding="utf-8") as f:
+            data = json.load(f)
+    except (OSError, ValueError) as e:
+        print("ERROR: couldn't read %s (%s). It defines every localized term "
+              "the audit relies on." % (os.path.basename(path), e))
+        sys.exit(2)
+    langs = data.get("languages")
+    if not isinstance(langs, dict) or not langs:
+        print("ERROR: %s has no 'languages' section." % os.path.basename(path))
+        sys.exit(2)
+    return langs
+
+
+LANGUAGES = load_languages()
+
+
+def _union(*path):
+    """Collects a nested list of terms across every language, lowercased."""
+    out = set()
+    for vocab in LANGUAGES.values():
+        node = vocab
+        for key in path:
+            node = node.get(key, {}) if isinstance(node, dict) else {}
+        if isinstance(node, list):
+            out.update(t.strip().lower() for t in node)
+    return out
+
+
+def _union_map(section):
+    """{key: (term, ...)} merged across languages — e.g. every spelling of the
+    'code' column, in every language listed."""
+    merged = {}
+    for vocab in LANGUAGES.values():
+        for key, terms in (vocab.get(section) or {}).items():
+            merged.setdefault(key, set()).update(t.strip().lower() for t in terms)
+    return {k: tuple(sorted(v)) for k, v in merged.items()}
+
+
+# Overview/summary tab names to skip when scanning category tabs.
+SKIP_SHEETS = {v["overview_sheet"] for v in LANGUAGES.values()} | {
+    alias for v in LANGUAGES.values() for alias in v.get("overview_sheet_aliases", [])
+} | {alias.title() for v in LANGUAGES.values() for alias in v.get("overview_sheet_aliases", [])}
+
+# Master-index spreadsheet naming conventions to auto-detect.
+MASTER_LIST_NAME_PATTERNS = tuple(
+    sorted({"%s*.xlsx" % v["spreadsheet_name"] for v in LANGUAGES.values()}
+           | {"Master Index*.xlsx"})
+)
 
 NO_CODE_MARKER = "—"
 
-# Status values that mark a document as superseded. Structure checks are
-# skipped for these.
-LEGACY_STATUS_LABELS = {"legacy", "legado"}
+# The three Status values Section 7 allows, with the spellings the tooling
+# recognizes. Compared lowercased but WITH accents: the spreadsheet's own
+# spelling is what matters, and "Em revisao" missing its cedilla is exactly the
+# typo this list exists to catch.
+#
+# A wrong Status is not cosmetic. It silently disables logic: the Overview's
+# COUNTIF formulas stop matching, so the category totals under-report, and a
+# misspelled legacy label makes a superseded document fall through to the
+# structure checks it was meant to be exempt from.
+STATUS_LABELS = _union_map("status")
+VALID_STATUS_VALUES = {v for spellings in STATUS_LABELS.values() for v in spellings}
+
+# Status values that mark a document as superseded. Structure and Version
+# History sequence checks are skipped for these. Derived from STATUS_LABELS
+# rather than repeated, so the two can't drift apart.
+LEGACY_STATUS_LABELS = set(STATUS_LABELS.get("legacy", ()))
 
 # ---------------------------------------------------------------------------
 # Formatting constants — these mirror Section 4 of SKILL.md ("Exact Word
@@ -173,13 +244,20 @@ EXPECTED_TITLE_COLOR = "1F3864"
 EXPECTED_CALLOUT_SHADING = "FFF3CD"
 EXPECTED_CALLOUT_TEXT_COLOR = "7B5C00"
 CALLOUT_PREFIX = "⚠"
-HEADING_STYLE_MARKERS = ("heading 1", "título 1", "titulo 1")
+HEADING_STYLE_MARKERS = tuple(sorted(_union("heading_style_markers")))
 
 # Sections whose body must be a list, and which kind. Checked only when the
 # section actually has body content — an empty section can't be judged.
-BULLET_SECTIONS = ("prerequisites", "pré-requisitos", "pre-requisitos",
-                   "verification", "verificação", "verificacao")
-NUMBERED_SECTIONS = ("step by step", "passo a passo")
+_SECTIONS = _union_map("sections")
+# Prerequisites and Verification must be a LIST, but either kind: bulleted or
+# numbered. The standard used to say bulleted, and a real base showed why that
+# was wrong — it used numbered lists essentially everywhere, so the rule was
+# describing a practice nobody followed. What actually matters is that the
+# items are a list rather than a wall of prose.
+ANY_LIST_SECTIONS = tuple(sorted(set(_SECTIONS.get("prerequisites", ()))
+                                 | set(_SECTIONS.get("verification", ()))))
+# Step by Step stays decimal: the steps are ordered, and a bullet loses that.
+NUMBERED_SECTIONS = tuple(sorted(_SECTIONS.get("steps", ())))
 DASHES = ("\u2013", "\u2014")  # en dash, em dash — the standard requires a plain hyphen
 
 # A folder whose name ends with one of these (case-insensitive) is treated as
@@ -194,16 +272,16 @@ ATTACHMENT_DIR_SUFFIXES = ("- files",)
 # Portuguese (this plugin's original base) and English, so rows are read by
 # column NAME instead of a fixed position — a column inserted or reordered in
 # the spreadsheet won't silently shift every other column's data.
-COLUMN_SYNONYMS = {
-    "code": ("código", "codigo", "code"),
-    "document": ("documento", "document"),
-    "file": ("arquivo", "file"),
-    "status": ("status",),
-    "version": ("versão", "versao", "version"),
-    "creation_date": ("data de criação", "data de criacao", "creation date"),
-    "last_updated": ("última atualização", "ultima atualizacao", "last updated"),
-    "owner": ("responsável", "responsavel", "owner"),
-}
+COLUMN_SYNONYMS = _union_map("columns")
+
+# Version History table columns, in both the current and the legacy layouts.
+HISTORY_COLUMNS = _union_map("history_columns")
+LEGACY_HISTORY_COLUMNS = _union_map("legacy_history_columns")
+
+# The Status spellings a person should actually see in an error message: the
+# written forms, not the internal keys ("in_review").
+STATUS_WRITTEN = sorted({w for v in LANGUAGES.values()
+                         for w in (v.get("status_written") or {}).values()})
 
 
 def nfc(text):
@@ -227,6 +305,41 @@ def nfc(text):
 # file-name pattern. That is what makes a custom name or a location outside the
 # base folder work as a continuous insertion point.
 CONFIG_FILENAME = ".kb-compiler.json"
+
+
+def stdin_is_interactive():
+    """
+    True only when there is a human who can actually answer a prompt.
+
+    `isatty()` alone is wrong on Windows: stdin redirected from NUL is a
+    character device, so isatty() reports a TERMINAL. A scheduled task or CI
+    run therefore printed a numbered menu to nobody, and only discovered the
+    truth when input() raised EOFError — by which point the menu was already on
+    screen, immediately followed by "running non-interactively", which reads as
+    the tool contradicting itself.
+
+    A real console answers GetConsoleMode; NUL does not, despite both being
+    character devices. That is the discriminator, and it costs one call. The
+    EOFError handlers downstream stay as a second line of defence.
+    """
+    try:
+        if not sys.stdin.isatty():
+            return False
+    except (AttributeError, ValueError):
+        return False          # detached stdin: nobody there
+    if os.name != "nt":
+        return True
+    try:
+        import ctypes
+        import msvcrt
+        handle = msvcrt.get_osfhandle(sys.stdin.fileno())
+        mode = ctypes.c_ulong()
+        return bool(ctypes.windll.kernel32.GetConsoleMode(handle, ctypes.byref(mode)))
+    except Exception:
+        # Couldn't tell. Assume interactive: guessing the other way would
+        # suppress a prompt a real person is sitting there waiting to answer,
+        # whereas guessing this way is still caught by the EOFError handlers.
+        return True
 
 
 def read_config(base_dir):
@@ -439,24 +552,28 @@ def classify_table_header(header_cells):
     if not header_cells or len(header_cells) < 4:
         return None, None, None
     lowered = [c.strip().lower() for c in header_cells]
-    # new format: has a column clearly called "version" AND an "author" one
-    if any("versão" in c or "versao" in c or "version" in c for c in lowered) and any(
-        "autor" in c or "author" in c for c in lowered
-    ):
-        idx_version = next(
-            i for i, c in enumerate(lowered) if "versão" in c or "versao" in c or "version" in c
-        )
-        idx_description = next((i for i, c in enumerate(lowered) if "descri" in c), None)
+
+    def find(terms, exact=False):
+        """Index of the first cell matching any term, or None."""
+        for i, c in enumerate(lowered):
+            for term in terms:
+                if (c == term) if exact else (term in c):
+                    return i
+        return None
+
+    # new format: a column clearly called "version" AND an "author" one
+    idx_version = find(HISTORY_COLUMNS.get("version", ()))
+    idx_author = find(HISTORY_COLUMNS.get("author", ()))
+    if idx_version is not None and idx_author is not None:
+        idx_description = find(HISTORY_COLUMNS.get("description", ()))
         return "new", idx_version, idx_description
-    # legacy format: has "reviewer"/"revisor" and "revision"/"revisão" as column names (not data)
-    if any("revisor" in c or "reviewer" in c for c in lowered) and any(
-        c.strip() in ("revisão", "revisao", "revision") for c in lowered
-    ):
-        idx_description = next(
-            (i for i, c in enumerate(lowered) if c.strip() in ("revisão", "revisao", "revision")),
-            None,
-        )
-        return "legacy", None, idx_description
+
+    # legacy format: "reviewer" plus "revision" as a column NAME, not as data —
+    # hence the exact match, so a cell reading "Revision Date" doesn't count.
+    if find(LEGACY_HISTORY_COLUMNS.get("reviewer", ())) is not None:
+        idx_description = find(LEGACY_HISTORY_COLUMNS.get("revision", ()), exact=True)
+        if idx_description is not None:
+            return "legacy", None, idx_description
     return None, None, None
 
 
@@ -546,6 +663,7 @@ def read_docx_signals(full_path, doc=None):
         "header_missing_version": False,
         "footer_label": None,
         "history_version": None,
+        "history_versions": [],
         "history_description": None,
         "table_format": None,  # "new", "legacy", None (unrecognized/empty)
         "error": None,
@@ -569,11 +687,33 @@ def read_docx_signals(full_path, doc=None):
                 fmt, idx_version, idx_description = classify_table_header(header_cells)
                 signals["table_format"] = fmt
                 if fmt == "new" and len(last_table.rows) >= 2:
-                    last_row = [c.text.strip() for c in last_table.rows[-1].cells]
-                    if idx_version is not None and idx_version < len(last_row):
-                        signals["history_version"] = last_row[idx_version]
-                    if idx_description is not None and idx_description < len(last_row):
-                        signals["history_description"] = last_row[idx_description]
+                    # Every FILLED version in the table, in document order.
+                    # Word tables routinely carry blank rows at the bottom, left
+                    # over from a template or from someone tabbing past the end.
+                    # Reading the literal last row then yielded "" for the
+                    # current version — and because the comparison below drops
+                    # empty sources before comparing, {header, "", sheet}
+                    # collapsed to one value and the version-divergence check
+                    # silently stopped running for that document. Found on a
+                    # real base, where it had disabled the check without a
+                    # single line of output saying so.
+                    if idx_version is not None:
+                        for row in last_table.rows[1:]:
+                            cells = [c.text.strip() for c in row.cells]
+                            if idx_version < len(cells) and cells[idx_version]:
+                                signals["history_versions"].append(cells[idx_version])
+                        if signals["history_versions"]:
+                            signals["history_version"] = signals["history_versions"][-1]
+
+                    # The description of that same last filled row.
+                    if idx_description is not None:
+                        for row in reversed(last_table.rows[1:]):
+                            cells = [c.text.strip() for c in row.cells]
+                            version_filled = (idx_version is None
+                                              or (idx_version < len(cells) and cells[idx_version]))
+                            if version_filled and idx_description < len(cells):
+                                signals["history_description"] = cells[idx_description]
+                                break
                 elif fmt == "legacy" and len(last_table.rows) >= 2:
                     last_row = [c.text.strip() for c in last_table.rows[-1].cells]
                     if idx_description is not None and idx_description < len(last_row):
@@ -645,6 +785,28 @@ def strip_numeric_prefix_for_compare(folder_name):
     return m.group(1).strip() if m else (folder_name or "").strip()
 
 
+def _style_name(paragraph):
+    """
+    The paragraph's style name, lowercased, or "" when it has none.
+
+    python-docx returns None for `paragraph.style` whenever the paragraph
+    points at a style id the document's styles part doesn't define. That is
+    routine in real Word documents — ones converted from .doc, or with content
+    pasted in from another file carrying its own styles. Reading `.name` off
+    that None aborted the entire audit partway through, and because Python
+    exits 1 on an uncaught exception, the crash was indistinguishable from this
+    tool's own "problems found" exit code.
+
+    Treating a style-less paragraph as having no style name is the conservative
+    reading: it is then simply not recognized as a heading or a list, which is
+    the same outcome as a paragraph styled Normal.
+    """
+    style = getattr(paragraph, "style", None)
+    if style is None:
+        return ""
+    return (style.name or "").strip().lower()
+
+
 def _style_chain(style, max_depth=10):
     """
     Yields a paragraph style and its base styles, outermost first. Word
@@ -712,11 +874,9 @@ def _rgb_str(value):
 # between them, and an extra custom heading is allowed — the standard doesn't
 # forbid one. What is checked: every required section exists, they appear in
 # the mandated relative order, and Version History is last.
-REQUIRED_SECTIONS = (
-    ("purpose", ("objetivo", "purpose")),
-    ("prerequisites", ("pré-requisitos", "pre-requisitos", "prerequisites")),
-    ("steps", ("passo a passo", "step by step")),
-    ("history", ("histórico de versões", "historico de versoes", "version history")),
+REQUIRED_SECTIONS = tuple(
+    (key, _SECTIONS.get(key, ()))
+    for key in ("purpose", "prerequisites", "steps", "history")
 )
 
 
@@ -733,7 +893,7 @@ def _list_format(paragraph, doc):
     # Word's built-in List Bullet / List Number styles — where the numbering
     # lives in the style definition, not on the paragraph — as if they were not
     # lists at all.
-    style_name = (paragraph.style.name or "").strip().lower()
+    style_name = _style_name(paragraph)
     if "list bullet" in style_name:
         return "bullet"
     if "list number" in style_name:
@@ -789,6 +949,64 @@ def _footer_signals(doc):
     return text, has_tab, has_page_field
 
 
+def parse_version(text):
+    """
+    "1.10" -> (1, 10). Returns None when the value isn't a dotted number, so an
+    unparseable cell is skipped rather than guessed at — the same conservative
+    rule the formatting checks follow.
+
+    Compared as integer tuples, not as text: "1.10" is a LATER version than
+    "1.9", which a string comparison gets backwards.
+    """
+    if not text:
+        return None
+    cleaned = str(text).strip().lstrip("vV").strip()
+    if not re.fullmatch(r"\d+(\.\d+)*", cleaned):
+        return None
+    return tuple(int(part) for part in cleaned.split("."))
+
+
+def check_version_history_sequence(versions, label):
+    """
+    Checks Section 3's rules about the Version History as a SEQUENCE: the first
+    row records the creation at 1.0, and versions only ever move forward.
+
+    Both were previously unenforceable, because only the table's last row was
+    ever read. A history missing its creation row, or one that goes backwards
+    after a bad merge, is a document whose audit trail no longer reconstructs
+    what happened to it — which is the entire purpose of the table.
+    """
+    issues = []
+    if not versions:
+        return issues  # no readable version column; reported elsewhere
+
+    first = parse_version(versions[0])
+    if first is None:
+        return issues  # unparseable: don't guess
+    if first != (1, 0):
+        issues.append(
+            "%s: the Version History starts at '%s'; Section 3 requires the first "
+            "row to be the creation, at version 1.0. Either the creation row was "
+            "deleted, or the table was started partway through the document's life."
+            % (label, versions[0])
+        )
+
+    previous = first
+    for current_text in versions[1:]:
+        current = parse_version(current_text)
+        if current is None:
+            continue
+        if current < previous:
+            issues.append(
+                "%s: the Version History goes backwards, from '%s' to '%s'. Rows "
+                "are in chronological order, so each version must be greater than "
+                "the one above it."
+                % (label, ".".join(str(n) for n in previous), current_text)
+            )
+        previous = max(previous, current)
+    return issues
+
+
 def check_document_structure(d, label):
     """
     Checks Section 3: required sections present, in order, with Version History
@@ -799,7 +1017,7 @@ def check_document_structure(d, label):
     issues = []
     headings = []
     for p in d.paragraphs:
-        style_name = (p.style.name or "").strip().lower()
+        style_name = _style_name(p)
         if any(marker in style_name for marker in HEADING_STYLE_MARKERS):
             headings.append(p.text.strip())
 
@@ -904,7 +1122,7 @@ def check_document_formatting(d, label):
 
     # --- section headings must use the NATIVE Heading 1 style ---
     for p in d.paragraphs:
-        style_name = (p.style.name or "").strip().lower()
+        style_name = _style_name(p)
         if any(marker in style_name for marker in HEADING_STYLE_MARKERS):
             builtin = getattr(p.style, "builtin", None)
             if builtin is None:
@@ -915,7 +1133,7 @@ def check_document_formatting(d, label):
             elif not builtin:
                 violations.append(
                     f"{label}: heading '{p.text.strip()[:30]}' uses a custom style "
-                    f"('{p.style.name}'), not Word's native Heading 1"
+                    f"('{_style_name(p)}'), not Word's native Heading 1"
                 )
 
     # --- warning callouts ---
@@ -995,31 +1213,65 @@ def check_document_formatting(d, label):
     # --- list formatting per section, only where the section has content ---
     headings = []
     for i, p in enumerate(d.paragraphs):
-        style_name = (p.style.name or "").strip().lower()
+        style_name = _style_name(p)
         if any(marker in style_name for marker in HEADING_STYLE_MARKERS):
             headings.append((i, p.text.strip().lower()))
 
     for pos, (idx, title) in enumerate(headings):
-        expected = None
-        if any(title.startswith(x) for x in BULLET_SECTIONS):
-            expected = "bullet"
+        accepted = None
+        if any(title.startswith(x) for x in ANY_LIST_SECTIONS):
+            accepted = ("bullet", "decimal")
         elif any(title.startswith(x) for x in NUMBERED_SECTIONS):
-            expected = "decimal"
-        if expected is None:
+            accepted = ("decimal",)
+        if accepted is None:
             continue
         end = headings[pos + 1][0] if pos + 1 < len(headings) else len(d.paragraphs)
         body_paras = [p for p in d.paragraphs[idx + 1:end] if p.text.strip()]
         if not body_paras:
             continue  # an empty section can't be judged
         formats = {_list_format(p, d) for p in body_paras}
-        if "unknown" in formats and expected not in formats:
+        if "unknown" in formats and not formats & set(accepted):
             unverifiable.append(
                 "%s: section '%s' — list numbering definition could not be resolved"
                 % (label, title)
             )
-        elif expected not in formats:
-            kind = "a bulleted list" if expected == "bullet" else "a numbered list"
+        elif not formats & set(accepted):
+            kind = ("a list (bulleted or numbered)" if len(accepted) > 1
+                    else "a numbered list")
             violations.append("%s: section '%s' is not formatted as %s" % (label, title, kind))
+
+    # --- each section gets its OWN numbering sequence ---
+    # Word numbers every paragraph sharing a numId as one continuous list, in
+    # document order. So when two sections share one, the second carries on from
+    # the first ("Step by Step - ServiceNow" starting at 9) instead of restarting
+    # at 1. Nothing about the document looks wrong while you read it: Word shows
+    # the numbers, they are simply the wrong ones, and the defect only surfaces
+    # when someone follows step 9 of a procedure that has four steps.
+    per_section = []
+    for p in d.paragraphs:
+        if any(m in _style_name(p) for m in HEADING_STYLE_MARKERS):
+            per_section.append((p.text.strip(), set()))
+            continue
+        if not per_section:
+            continue
+        pPr = p._p.pPr
+        numPr = pPr.find(qn("w:numPr")) if pPr is not None else None
+        if numPr is None:
+            continue
+        num_id = numPr.find(qn("w:numId"))
+        if num_id is not None and num_id.get(qn("w:val")):
+            per_section[-1][1].add(num_id.get(qn("w:val")))
+
+    owner = {}
+    for heading, num_ids in per_section:
+        for num_id in sorted(num_ids):
+            first = owner.setdefault(num_id, heading)
+            if first != heading:
+                violations.append(
+                    "%s: sections '%s' and '%s' share one numbering sequence, so the "
+                    "second continues the first's count instead of restarting at 1"
+                    % (label, first[:34], heading[:34])
+                )
 
     # --- author names in the Version History must be Title Case, not all caps ---
     if d.tables:
@@ -1081,7 +1333,7 @@ def resolve_missing_master_list(base_dir):
     # from NUL is reported as a TERMINAL, so a cron/CI/pipeline run took the
     # interactive path below and died on its first prompt instead of printing
     # this guidance. An immediate EOF is therefore treated the same way.
-    if not sys.stdin.isatty():
+    if not stdin_is_interactive():
         print_guidance()
         return None, False
 
@@ -1227,6 +1479,8 @@ def check(base_dir, master_list_name=None):
     legacy_table_issues = []
     header_missing_tab_issues = []
     header_missing_version_issues = []
+    invalid_status_issues = []
+    version_sequence_issues = []
     unreadable_document_issues = []
     formatting_issues = []
     formatting_unverifiable = []
@@ -1280,6 +1534,28 @@ def check(base_dir, master_list_name=None):
                     )
                 else:
                     codes_seen[codigo] = sheet_name
+
+            # 1b) Status must be one of the three values Section 7 allows. This
+            # is checked on the ROW, before the file is even resolved, because
+            # Status is a property of the index rather than of the document.
+            status_text = str(status).strip() if status is not None else ""
+            if not status_text:
+                invalid_status_issues.append(
+                    "[%s] %s ('%s'): the Status cell is empty. Section 7 requires "
+                    "one of: %s." % (sheet_name, codigo, documento,
+                                     ", ".join(STATUS_WRITTEN))
+                )
+            elif status_text.lower() not in VALID_STATUS_VALUES:
+                invalid_status_issues.append(
+                    "[%s] %s ('%s'): Status is '%s', which is not one of the values "
+                    "Section 7 allows (%s). A value the tooling doesn't recognize "
+                    "silently breaks things rather than failing loudly: the "
+                    "Overview's COUNTIF formulas stop counting this row, and a "
+                    "misspelled legacy label makes the document fall through to "
+                    "the structure checks it should be exempt from."
+                    % (sheet_name, codigo, documento, status_text,
+                       ", ".join(STATUS_WRITTEN))
+                )
 
             if not arquivo:
                 continue
@@ -1379,6 +1655,12 @@ def check(base_dir, master_list_name=None):
             # exactly the failure the conservative mode exists to avoid.
             if str(status or "").strip().lower() not in LEGACY_STATUS_LABELS:
                 structure_issues.extend(check_document_structure(document, label))
+                # Same exemption as the structure checks, and for the same
+                # reason: a superseded document predates the standard, so its
+                # history was never going to start at 1.0.
+                version_sequence_issues.extend(
+                    check_version_history_sequence(signals["history_versions"], label)
+                )
 
             # The footer's organization label. It can't be validated in
             # isolation (the script doesn't know the base's label), but every
@@ -1568,6 +1850,8 @@ def check(base_dir, master_list_name=None):
     section("Header missing its version (Section 4)", header_missing_version_issues)
     section("Unreadable documents (the file exists but cannot be parsed)",
             unreadable_document_issues)
+    section("Invalid Status value (Section 7)", invalid_status_issues)
+    section("Version History sequence (Section 3)", version_sequence_issues)
     if len(footer_labels) > 1:
         detail = ["the base uses more than one footer label; every document must carry the same one:"]
         for prefix, codes in sorted(footer_labels.items()):
@@ -1621,6 +1905,8 @@ def check(base_dir, master_list_name=None):
         + len(header_missing_tab_issues)
         + len(header_missing_version_issues)
         + len(unreadable_document_issues)
+        + len(invalid_status_issues)
+        + len(version_sequence_issues)
         + len(formatting_issues)
         + len(structure_issues)
         + len(folder_mismatch_issues)
@@ -1650,6 +1936,19 @@ if __name__ == "__main__":
         total_problems = check(base_dir_arg, master_list_arg)
     except (FileNotFoundError, RuntimeError) as e:
         print(f"ERROR: {e}")
+        sys.exit(2)
+    except Exception:
+        # Any unexpected failure is "couldn't run" (2), never "problems found"
+        # (1). Python exits 1 on an uncaught exception, and this tool's own
+        # contract reads 1 as a completed audit that found things — so without
+        # this, a crash silently passes for a result in any wrapper, CI job or
+        # batch-edit gate that keys on the exit code. Found by running against
+        # a real base: one document with a style-less paragraph took down the
+        # whole audit and reported it as a finding.
+        import traceback
+        print("ERROR: the audit failed to complete. Nothing was changed.")
+        print("Please report the traceback below.")
+        traceback.print_exc()
         sys.exit(2)
 
     # Exit codes are distinct on purpose so a wrapper can tell the three cases

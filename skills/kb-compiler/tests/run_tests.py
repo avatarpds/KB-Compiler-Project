@@ -48,16 +48,23 @@ EXPECTED = {
     "Orphaned files": 2,
     "Duplicate/shared codes": 1,     # KB-009 reused across two sheets
     "Name divergence": 3,            # KB-010, KB-034 (blank first paragraph), KB-009 (duplicate row)
-    "Version divergence": 1,         # KB-017 header/history mismatch
+    # KB-017 (header/history mismatch) + KB-058, whose divergence was hidden by
+    # blank rows at the bottom of its Version History table.
+    "Version divergence": 2,
     "Version History table in the legacy format": 1,   # KB-020
     # KB-011 (glued: "YubiKeyv1.0") + KB-046 (spaced: "Nome Colado v1.0")
     "Header missing the tab separator": 2,
     "Header missing its version": 1,   # KB-037: "... Office v2", no version at all
     "Unreadable documents": 1,         # KB-048: .docx extension, not a Word file
+    "Invalid Status value": 1,         # KB-049: "Em Revisao", missing its cedilla
+    # KB-051 (history starts at 2.0) + KB-052 (1.2 -> 1.1). KB-053 (1.9 -> 1.10)
+    # must NOT appear: it moves forward, and only trips a text comparison.
+    "Version History sequence": 2,
     # KB-030 (4 margins + size + color), KB-031 (shading + color), KB-040
     # (landscape + no footer), KB-041 (en dash), KB-042 (2 non-list sections),
-    # KB-043 (all-caps author), plus one base-level footer-label mismatch.
-    "Formatting violations": 15,
+    # KB-043 (all-caps author), KB-060 (two sections on one numbering
+    # sequence), plus one base-level footer-label mismatch.
+    "Formatting violations": 16,
     "Structure violations": 2,       # KB-036: missing Prerequisites + history not last
     "Folder/tab mismatch": 2,        # KB-035 (planted) + KB-009's duplicate row
     # KB-045 is resolved by its tab; KB-047's two copies are not.
@@ -243,6 +250,14 @@ def test_non_interactive(tmp):
         failures.append("the guidance doesn't point at bootstrap_master_list.py")
     if "Traceback" in proc.stderr:
         failures.append("a missing spreadsheet still produces a raw traceback")
+    # The interactive menu must not be printed at all. It used to appear first,
+    # with "running non-interactively" immediately after it, because Windows
+    # reports a NUL stdin as a terminal and the truth only surfaced when input()
+    # hit EOF. The output contradicted itself.
+    for line in ("[1] Create one now", "What would you like to do?"):
+        if line in proc.stdout:
+            failures.append("the interactive menu was printed to a non-interactive "
+                            "run: %r" % line)
 
     return failures
 
@@ -636,6 +651,58 @@ def test_force_does_not_index_the_index(tmp):
     return []
 
 
+def test_language_is_detected(tmp):
+    """
+    A base whose documents are written in Portuguese must produce a Portuguese
+    index without anyone passing --lang. Section 0 says to follow whichever
+    language the base already uses; requiring the flag was the tooling
+    contradicting its own standard, and getting it wrong writes an index whose
+    column headers don't match the documents it indexes.
+    """
+    base = os.path.join(tmp, "langdetect")
+    os.makedirs(os.path.join(base, "01 - Categoria"))
+    # KB-039 in the fixture is the fully conforming Portuguese document.
+    src = os.path.join(tmp, "detections", "03 - Infrastructure",
+                       "KB-039 - Documento em Portugues.docx")
+    for name in ("KB-001 - Um.docx", "KB-002 - Dois.docx"):
+        shutil.copy(src, os.path.join(base, "01 - Categoria", name))
+
+    proc = run([BOOTSTRAP, base])
+    if proc.returncode != 0:
+        return ["bootstrap failed (rc=%d): %s" % (proc.returncode, proc.stdout[-200:])]
+
+    failures = []
+    if "Language detected: pt" not in proc.stdout:
+        failures.append("the detected language was not reported: %r" % proc.stdout[:220])
+
+    sheets = [f for f in os.listdir(base) if f.lower().endswith(".xlsx")]
+    if not sheets:
+        return ["no spreadsheet was created"]
+    if not sheets[0].startswith("Lista Mestra"):
+        failures.append("the index was not named in Portuguese: %r" % sheets[0])
+
+    wb = openpyxl.load_workbook(os.path.join(base, sheets[0]))
+    if wb.sheetnames[0] != "Visão Geral":
+        failures.append("overview tab is %r, expected 'Visão Geral'" % wb.sheetnames[0])
+    ws = wb[wb.sheetnames[1]]
+    headers = [c for c in next(ws.iter_rows(min_row=2, max_row=2, values_only=True)) if c]
+    if headers[:3] != ["Código", "Documento", "Arquivo"]:
+        failures.append("index headers are not Portuguese: %r" % headers[:3])
+
+    # An explicit --lang must still win over the detection.
+    other = os.path.join(tmp, "langoverride")
+    shutil.copytree(base, other)
+    for f in os.listdir(other):
+        if f.lower().endswith(".xlsx"):
+            os.remove(os.path.join(other, f))
+    os.remove(os.path.join(other, ".kb-compiler.json"))
+    proc = run([BOOTSTRAP, other, "--lang", "en"])
+    sheets = [f for f in os.listdir(other) if f.lower().endswith(".xlsx")]
+    if not sheets or not sheets[0].startswith("Master List"):
+        failures.append("--lang en did not override the detection: %r" % sheets)
+    return failures
+
+
 TESTS = [
     ("detections", test_detections),
     ("bootstrap", test_bootstrap),
@@ -652,6 +719,7 @@ TESTS = [
     ("colliding category names", test_colliding_category_names),
     ("Overview extra column", test_overview_extra_column),
     ("--force never indexes the index", test_force_does_not_index_the_index),
+    ("language detected from the base", test_language_is_detected),
 ]
 
 

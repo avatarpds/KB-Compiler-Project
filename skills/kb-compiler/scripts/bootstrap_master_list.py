@@ -25,7 +25,11 @@ a guess. This script therefore:
 - skips attachment folders (see ATTACHMENT_DIR_SUFFIXES in check_master_list).
 
 Usage:
-    python3 bootstrap_master_list.py <base_path> [--lang en|pt] [--owner "Name"] [--output PATH.xlsx] [--force]
+    python3 bootstrap_master_list.py <base_path> [--lang CODE] [--owner "Name"] [--output PATH.xlsx] [--force]
+
+--lang is optional: the language is detected from the documents themselves.
+Pass it only to override. The available codes come from languages.json, where
+adding a language is a data edit rather than a code change.
 """
 
 import datetime
@@ -48,41 +52,95 @@ except ImportError:
     sys.exit(2)
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import docx  # noqa: E402
+
 from check_master_list import (  # noqa: E402
     CONFIG_FILENAME,
+    HEADING_STYLE_MARKERS,
+    LANGUAGES,
+    _style_name,
     is_master_list_filename,
     MASTER_LIST_NAME_PATTERNS,
     NO_CODE_MARKER,
     is_inside_attachment_folder,
     nfc,
+    stdin_is_interactive,
     read_config,
     write_config,
     read_docx_signals,
 )
 
-# Canonical column order, shared with the checker's COLUMN_SYNONYMS so the
-# spreadsheet this script writes is the one the checker knows how to read.
-HEADERS = {
-    "pt": ["Código", "Documento", "Arquivo", "Status", "Versão",
-           "Data de Criação", "Última Atualização", "Responsável"],
-    "en": ["Code", "Document", "File", "Status", "Version",
-           "Creation Date", "Last Updated", "Owner"],
-}
-OVERVIEW_SHEET = {"pt": "Visão Geral", "en": "Overview"}
-OVERVIEW_HEADERS = {
-    "pt": ["Categoria", "Total", "Ativos", "Em revisão", "Aba"],
-    "en": ["Category", "Total", "Active", "In review", "Tab"],
-}
-STATUS_IN_REVIEW = {"pt": "Em revisão", "en": "In review"}
-STATUS_LEGACY = {"pt": "Legado", "en": "Legacy"}
-LEGACY_FOLDERS = ("legado", "legacy")
-BASE_TITLE = {"pt": "Base de Conhecimento", "en": "Knowledge Base"}
+# Every localized term comes from languages.json, via the checker — so the
+# spreadsheet this script WRITES is by construction the one the checker knows
+# how to READ, and adding a language never means editing either script.
+HEADERS = {code: v["index_headers"] for code, v in LANGUAGES.items()}
+OVERVIEW_SHEET = {code: v["overview_sheet"] for code, v in LANGUAGES.items()}
+OVERVIEW_HEADERS = {code: v["overview_headers"] for code, v in LANGUAGES.items()}
+STATUS_IN_REVIEW = {code: v["status_written"]["in_review"] for code, v in LANGUAGES.items()}
+STATUS_LEGACY = {code: v["status_written"]["legacy"] for code, v in LANGUAGES.items()}
+STATUS_ACTIVE = {code: v["status_written"]["active"] for code, v in LANGUAGES.items()}
+TAB_WORD = {code: v["tab_word"] for code, v in LANGUAGES.items()}
+# A folder is "legacy" if it matches that word in ANY language: a base can
+# perfectly well be authored in Portuguese with a folder named "Legacy".
+LEGACY_FOLDERS = tuple(sorted({f.lower() for v in LANGUAGES.values()
+                               for f in v["legacy_folders"]}))
+BASE_TITLE = {code: v["base_title"] for code, v in LANGUAGES.items()}
+
+
+def detect_language(base_dir, sample=40):
+    """
+    Infers which language a base is authored in, by reading its documents.
+
+    Section 0 of the standard says to default to whichever language the base
+    already uses — but the tooling used to make you declare it with --lang, and
+    getting it wrong writes an index whose column headers don't match the
+    documents it indexes.
+
+    Scoring is deliberately dumb and explainable: count how many Heading-1
+    section titles match each language's section vocabulary. A conforming
+    document contributes several hits in exactly one language, so even a
+    handful of documents settles it. Ties and empty bases return None, and the
+    caller decides rather than this function guessing.
+
+    Returns (code_or_None, evidence_dict).
+    """
+    scores = {code: 0 for code in LANGUAGES}
+    seen = 0
+    for root, _dirs, files in os.walk(base_dir):
+        if is_inside_attachment_folder(
+                nfc(os.path.relpath(os.path.join(root, "x"), base_dir)).replace(os.sep, "/")):
+            continue
+        for fname in sorted(files):
+            if not fname.lower().endswith(".docx") or fname.startswith("~$"):
+                continue
+            if seen >= sample:
+                break
+            path = os.path.join(root, fname)
+            try:
+                d = docx.Document(path)
+            except Exception:
+                continue
+            seen += 1
+            headings = [p.text.strip().lower() for p in d.paragraphs
+                        if any(m in _style_name(p) for m in HEADING_STYLE_MARKERS)]
+            for code, vocab in LANGUAGES.items():
+                for terms in vocab["sections"].values():
+                    if any(h.startswith(t) for h in headings for t in terms):
+                        scores[code] += 1
+
+    ranked = sorted(scores.items(), key=lambda kv: kv[1], reverse=True)
+    evidence = {"documents_read": seen, "scores": dict(ranked)}
+    if seen == 0 or ranked[0][1] == 0:
+        return None, evidence
+    if len(ranked) > 1 and ranked[0][1] == ranked[1][1]:
+        return None, evidence          # a tie is not a detection
+    return ranked[0][0], evidence
 # Documents sitting loose in the base root belong to no folder, so there is no
 # category to infer. They are indexed under this tab rather than skipped: the
 # checker would otherwise report every one of them as an orphan, leaving the
 # two tools contradicting each other about the same files.
-UNCATEGORIZED = {"pt": "Sem Categoria", "en": "Uncategorized"}
-SPREADSHEET_NAME = {"pt": "Lista Mestra", "en": "Master List"}
+UNCATEGORIZED = {code: v["uncategorized"] for code, v in LANGUAGES.items()}
+SPREADSHEET_NAME = {code: v["spreadsheet_name"] for code, v in LANGUAGES.items()}
 
 INDEXABLE_EXTENSIONS = (".docx", ".pdf", ".pptx", ".xlsx")
 CODE_RE = re.compile(r"^(KB-\d{3})\s*-\s*(.+)$", re.IGNORECASE)
@@ -102,7 +160,7 @@ def safe_sheet_name(name, taken):
     keep the Overview's "Aba" column pointing at the name that actually exists.
     """
     cleaned = "".join("-" if ch in INVALID_SHEET_CHARS else ch for ch in name).strip()
-    cleaned = cleaned or "Categoria"
+    cleaned = cleaned or "Categoria"   # last-resort name for an unnameable folder
     changed = cleaned != name
 
     candidate = cleaned[:MAX_SHEET_NAME].strip()
@@ -276,7 +334,7 @@ def build_workbook(categories, lang, owner=""):
         # stale the moment anyone appended a row.
         first, last = 3, 10000
         quoted = f"'{sheet}'"
-        active_label = "Ativo" if lang == "pt" else "Active"
+        active_label = STATUS_ACTIVE[lang]
         review_label = STATUS_IN_REVIEW[lang]
         ov.cell(row=r, column=1, value=category)
         # Live formulas rather than frozen numbers: static counts go stale the
@@ -286,7 +344,7 @@ def build_workbook(categories, lang, owner=""):
                 value=f'=COUNTIF({quoted}!{status_col}{first}:{status_col}{last},"{active_label}")')
         ov.cell(row=r, column=4,
                 value=f'=COUNTIF({quoted}!{status_col}{first}:{status_col}{last},"{review_label}")')
-        tab_word = "Aba" if lang == "pt" else "Tab"
+        tab_word = TAB_WORD[lang]
         ov.cell(row=r, column=5, value=f"→ {tab_word} '{sheet}'")
 
     for category, rows in categories.items():
@@ -324,7 +382,7 @@ def choose_target(base_dir, lang):
     """
     default = default_target(base_dir, lang)
 
-    if not sys.stdin.isatty():
+    if not stdin_is_interactive():
         return default
 
     print("\nWhere should this base's master index live?")
@@ -376,8 +434,30 @@ def choose_target(base_dir, lang):
     return default
 
 
-def bootstrap(base_dir, lang="en", owner="", force=False, quiet=False, target=None):
-    """Returns the path of the spreadsheet written, or raises on refusal."""
+def bootstrap(base_dir, lang=None, owner="", force=False, quiet=False, target=None):
+    """
+    Returns the path of the spreadsheet written, or raises on refusal.
+
+    lang=None means "read the base and work it out" — Section 0 says to follow
+    whichever language the base already uses, and making the caller declare it
+    was the tooling contradicting its own standard.
+    """
+    detection = None
+    if lang is None:
+        lang, detection = detect_language(base_dir)
+        if lang is None:
+            # Inconclusive. Say so plainly instead of quietly picking one and
+            # writing an index whose headers don't match the documents.
+            lang = "en"
+            print("Could not tell which language this base is written in "
+                  "(%d document(s) read, scores: %s)." % (detection["documents_read"],
+                                                          detection["scores"]))
+            print("Defaulting to '%s'. Pass --lang to say otherwise: %s"
+                  % (lang, ", ".join(sorted(LANGUAGES))))
+        elif not quiet:
+            print("Language detected: %s (%s). %d document(s) read, scores: %s"
+                  % (lang, LANGUAGES[lang]["display_name"],
+                     detection["documents_read"], detection["scores"]))
     if target is None:
         target = choose_target(base_dir, lang)
         if target is None:
@@ -456,7 +536,8 @@ def main():
 
     base_dir = args[0]
     force = "--force" in args
-    lang = "en"
+    # None means "detect from the base". An explicit --lang always overrides.
+    lang = None
     if "--lang" in args:
         idx = args.index("--lang")
         value = args[idx + 1] if idx + 1 < len(args) else None
@@ -464,7 +545,8 @@ def main():
             # Falling back to the default silently used to write a SECOND
             # spreadsheet next to an existing one in another language, which
             # --force couldn't protect against because the new target didn't
-            # exist yet.
+            # exist yet. The valid set comes from languages.json, so adding a
+            # language makes it accepted here with no code change.
             print("ERROR: --lang must be one of: %s (got: %r)"
                   % (", ".join(sorted(HEADERS)), value))
             return 2

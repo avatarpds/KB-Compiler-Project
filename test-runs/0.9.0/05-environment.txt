@@ -1,0 +1,12 @@
+# Environment
+
+date (UTC):      2026-09-12 03:53:20
+platform:        Windows 11 (AMD64)
+python:          3.13.14
+python-docx:     1.2.0
+openpyxl:        3.1.5
+locale encoding: cp1252
+PYTHONIOENCODING: None
+
+CI has never run: it executes only after a push.
+Python 3.9 is therefore UNVERIFIED - only 3.13 was exercised here.

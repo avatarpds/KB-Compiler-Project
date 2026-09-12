@@ -159,11 +159,16 @@ def build(out):
     d.save(os.path.join(ident, "KB-011 - Configurar YubiKey.docx"))
 
     # --- version divergence between header/history/spreadsheet ---
+    # The history carries a proper creation row so this document tests the
+    # divergence and nothing else. With a single 2.1 row it would ALSO trip the
+    # "history must start at 1.0" rule, putting two deliberate defects in one
+    # document and making the fixture harder to reason about.
     d = new_doc()
     d.sections[0].header.paragraphs[0].text = "KB-017 - Autopilot\tv1.0"
     add_title(d, "KB-017 - Autopilot")
     add_body_sections(d)
-    add_history(d, [["Lucas Souza", "2.1", "Set/2026", "Ajuste"]])
+    add_history(d, [["Lucas Souza", "1.0", "Set/2026", "Criação"],
+                    ["Lucas Souza", "2.1", "Set/2026", "Ajuste"]])
     d.save(os.path.join(infra, "KB-017 - Autopilot.docx"))
 
     # --- legacy-format version history table ---
@@ -392,6 +397,107 @@ def build(out):
     with open(os.path.join(infra, "KB-048 - Corrompido.docx"), "wb") as f:
         f.write(b"\xd0\xcf\x11\xe0 not a docx at all")
 
+    # --- Status typo in the index. The document itself is conforming; only the
+    # spreadsheet cell is wrong ("Em Revisao", missing its cedilla). Exactly the
+    # value that looks right to a human and matches nothing in the tooling.
+    d = new_doc()
+    d.sections[0].header.paragraphs[0].text = "KB-049 - Status Invalido\tv1.0"
+    add_title(d, "KB-049 - Status Invalido")
+    add_body_sections(d)
+    add_history(d, hist)
+    d.save(os.path.join(infra, "KB-049 - Status Invalido.docx"))
+
+    # --- Version History that never records the creation: its first row is 2.0.
+    # Header and index agree with the LAST row, so the only finding is the
+    # missing 1.0 — no version divergence riding along.
+    d = new_doc()
+    d.sections[0].header.paragraphs[0].text = "KB-051 - Historico Sem Criacao\tv2.0"
+    add_title(d, "KB-051 - Historico Sem Criacao")
+    add_body_sections(d)
+    add_history(d, [["Lucas Souza", "2.0", "Set/2026", "Ajuste"]])
+    d.save(os.path.join(infra, "KB-051 - Historico Sem Criacao.docx"))
+
+    # --- Version History that goes backwards: 1.0 -> 1.2 -> 1.1, the signature
+    # of a botched merge. Again isolated: the last row, header and index all
+    # agree on 1.1.
+    d = new_doc()
+    d.sections[0].header.paragraphs[0].text = "KB-052 - Historico Regride\tv1.1"
+    add_title(d, "KB-052 - Historico Regride")
+    add_body_sections(d)
+    add_history(d, [["Lucas Souza", "1.0", "Set/2026", "Criação"],
+                    ["Lucas Souza", "1.2", "Set/2026", "Ajuste"],
+                    ["Lucas Souza", "1.1", "Set/2026", "Correção"]])
+    d.save(os.path.join(infra, "KB-052 - Historico Regride.docx"))
+
+    # --- NEGATIVE control for the sequence check: 1.9 -> 1.10 moves FORWARD.
+    # Compared as text, "1.10" < "1.9" and this document would be reported as
+    # going backwards. It must produce nothing.
+    d = new_doc()
+    d.sections[0].header.paragraphs[0].text = "KB-053 - Versao Dois Digitos\tv1.10"
+    add_title(d, "KB-053 - Versao Dois Digitos")
+    add_body_sections(d)
+    add_history(d, [["Lucas Souza", "1.0", "Set/2026", "Criação"],
+                    ["Lucas Souza", "1.9", "Set/2026", "Ajuste"],
+                    ["Lucas Souza", "1.10", "Set/2026", "Ajuste"]])
+    d.save(os.path.join(infra, "KB-053 - Versao Dois Digitos.docx"))
+
+    # --- Version History with trailing BLANK rows hiding a divergence. The
+    # header and the index both say 1.1; the last filled history row says 2.0.
+    # Reading the literal last row returned "", which the comparison discards,
+    # so the three sources collapsed to one value and nothing was reported.
+    d = new_doc()
+    d.sections[0].header.paragraphs[0].text = "KB-058 - Historico Com Linhas Vazias	v1.1"
+    add_title(d, "KB-058 - Historico Com Linhas Vazias")
+    add_body_sections(d)
+    add_history(d, [["Lucas Souza", "1.0", "Set/2026", "Criação"],
+                    ["Lucas Souza", "2.0", "Set/2026", "Ajuste"],
+                    ["", "", "", ""],
+                    ["", "", "", ""]])
+    d.save(os.path.join(infra, "KB-058 - Historico Com Linhas Vazias.docx"))
+
+    # --- Prerequisites as a NUMBERED list. Conforming in every respect: the
+    # heading is a Heading 1 and the items are a list, which is what the rule
+    # actually cares about. Before Prerequisites was allowed to be numbered,
+    # this document reported "not formatted as a bulleted list".
+    d = new_doc()
+    d.sections[0].header.paragraphs[0].text = "KB-059 - Prereq Numerado	v1.0"
+    add_title(d, "KB-059 - Prereq Numerado")
+    d.add_heading("Purpose", 1)
+    d.add_heading("Prerequisites", 1)
+    d.add_paragraph("Access to the VPN", style="List Number")
+    d.add_heading("Step by Step", 1)
+    d.add_paragraph("Do the thing", style="List Number")
+    add_history(d, hist)
+    d.save(os.path.join(infra, "KB-059 - Prereq Numerado.docx"))
+
+    # --- two Step by Step sections sharing ONE numbering sequence. Word counts
+    # every paragraph with the same numId as a single list, so the second
+    # section carries on from the first instead of restarting at 1 — invisible
+    # while reading, because Word does show numbers, just the wrong ones.
+    d = new_doc()
+    d.sections[0].header.paragraphs[0].text = "KB-060 - Numeracao Compartilhada\tv1.0"
+    add_title(d, "KB-060 - Numeracao Compartilhada")
+    d.add_heading("Purpose", 1)
+    d.add_heading("Prerequisites", 1)
+    d.add_paragraph("A prerequisite", style="List Bullet")
+    d.add_heading("Step by Step", 1)
+    first = d.add_paragraph("Do the first thing", style="List Number")
+    d.add_heading("Step by Step - Alternate", 1)
+    second = d.add_paragraph("Do the other thing", style="List Number")
+    # Pin both to the same explicit numId, which is what a real document ends up
+    # with after someone copies a block between sections.
+    numbering = d.part.numbering_part.element
+    shared_id = numbering.findall(qn("w:num"))[0].get(qn("w:numId"))
+    for para in (first, second):
+        pPr = para._p.get_or_add_pPr()
+        numPr = OxmlElement("w:numPr")
+        ilvl = OxmlElement("w:ilvl"); ilvl.set(qn("w:val"), "0")
+        num = OxmlElement("w:numId"); num.set(qn("w:val"), shared_id)
+        numPr.append(ilvl); numPr.append(num)
+        pPr.append(numPr)
+    add_history(d, hist)
+    d.save(os.path.join(infra, "KB-060 - Numeracao Compartilhada.docx"))
+
     # --- multilingual recognition: a fully conforming document whose section
     # headings and history columns are in another language (Portuguese here).
     # It must produce ZERO findings — if language recognition ever regressed,
@@ -462,6 +568,14 @@ def build(out):
             ("KB-044", "Rodape Divergente", "KB-044 - Rodape Divergente.docx", "Active", "1.0", BASE_DATE, BASE_DATE, "Lucas Souza"),
             ("KB-039", "Documento em Portugues", "KB-039 - Documento em Portugues.docx", "Active", "1.0", BASE_DATE, BASE_DATE, "Lucas Souza"),
             ("KB-048", "Corrompido", "KB-048 - Corrompido.docx", "Active", "1.0", BASE_DATE, BASE_DATE, "Lucas Souza"),
+            # invalid Status: "Em Revisao" is missing its cedilla
+            ("KB-049", "Status Invalido", "KB-049 - Status Invalido.docx", "Em Revisao", "1.0", BASE_DATE, BASE_DATE, "Lucas Souza"),
+            ("KB-051", "Historico Sem Criacao", "KB-051 - Historico Sem Criacao.docx", "Active", "2.0", BASE_DATE, BASE_DATE, "Lucas Souza"),
+            ("KB-052", "Historico Regride", "KB-052 - Historico Regride.docx", "Active", "1.1", BASE_DATE, BASE_DATE, "Lucas Souza"),
+            ("KB-053", "Versao Dois Digitos", "KB-053 - Versao Dois Digitos.docx", "Active", "1.10", BASE_DATE, BASE_DATE, "Lucas Souza"),
+            ("KB-058", "Historico Com Linhas Vazias", "KB-058 - Historico Com Linhas Vazias.docx", "Active", "1.1", BASE_DATE, BASE_DATE, "Lucas Souza"),
+            ("KB-059", "Prereq Numerado", "KB-059 - Prereq Numerado.docx", "Active", "1.0", BASE_DATE, BASE_DATE, "Lucas Souza"),
+            ("KB-060", "Numeracao Compartilhada", "KB-060 - Numeracao Compartilhada.docx", "Active", "1.0", BASE_DATE, BASE_DATE, "Lucas Souza"),
             # duplicate code: KB-009 already used in the other sheet
             ("KB-009", "Codigo Duplicado", "KB-009 - Configurar MFA.docx", "Active", "1.0", BASE_DATE, BASE_DATE, "Lucas Souza"),
         ],

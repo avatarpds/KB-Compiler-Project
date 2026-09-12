@@ -2,6 +2,103 @@
 
 All notable changes to this project are documented here.
 
+## 0.9.0
+
+Continuous integration, and two rules the standard has always stated that
+nothing enforced.
+
+- **CI on a matrix of operating systems.** `.github/workflows/tests.yml` runs
+  the suite on Ubuntu and Windows, on Python 3.9 and 3.13. Both defects fixed
+  in 0.8.4 were Windows-only and neither was reproducible on Linux, so a
+  single-platform check would have missed them exactly as a human did. The
+  workflow also audits the fixture twice — once to a console, once redirected
+  to a file — and fails if anything reaches stderr or the report has no
+  `SUMMARY` line, because a crash halfway through the report still exits with
+  the code that means "problems found".
+
+- **Status values are validated** (Section 7). Only `Active`, `In review` and
+  `Legacy` are legal, in the spellings the tooling recognizes. A value it
+  doesn't know breaks things silently instead of loudly: the Overview's COUNTIF
+  formulas stop counting the row, and a misspelled legacy label lets a
+  superseded document fall through to the structure checks it should be exempt
+  from. `Em Revisao` without its cedilla is the case that motivated this.
+  `LEGACY_STATUS_LABELS` is now derived from the same table rather than
+  repeated beside it.
+
+- **The Version History is checked as a sequence** (Section 3), not only by its
+  last row. The first row must record the creation at 1.0, and versions must
+  only move forward; a history that goes 1.0 → 1.2 → 1.1 is the signature of a
+  botched edit, and one that never starts at 1.0 has lost its creation row.
+  Versions are compared as integer tuples, so 1.9 → 1.10 is correctly read as
+  moving forward — as text it looks like a regression, and the fixture carries
+  that case as a negative control. Both checks are skipped for Legacy-status
+  documents, on the same reasoning as the structure checks.
+
+Found by running against a real 68-document base for the first time — none of
+these reproduce on the synthetic fixture:
+
+- **`paragraph.style` can be `None`**, and reading `.name` off it aborted the
+  entire audit. python-docx returns None whenever a paragraph points at a style
+  the document's styles part doesn't define, which is routine in documents
+  converted from .doc or carrying pasted-in content: 15% of the real base hit
+  it. A style-less paragraph is now treated as having no style name, which is
+  the same outcome as one styled Normal.
+- **A crash exited 1**, and this tool's contract reads 1 as "problems found" —
+  so any wrapper, CI job or batch-edit gate keying on the exit code took a
+  traceback for a completed audit. Unexpected failures now exit 2.
+- **Blank rows at the bottom of a Version History** made the current version
+  read as `""`. Since the comparison drops empty sources before comparing,
+  `{header, "", index}` collapsed to a single value and the version-divergence
+  check silently stopped running for that document. The last FILLED row is now
+  what counts.
+
+- **Prerequisites and Verification may be numbered, not only bulleted**, and a
+  new check catches **two sections sharing one numbering sequence**. Both came
+  out of a real base: it used numbered lists essentially everywhere, so the
+  "bulleted" rule described a practice nobody followed, and 13 of its documents
+  had sections silently continuing each other's count — a defect invisible on
+  screen, since Word shows numbers either way, just the wrong ones. The heading
+  of a section is always a heading; only its items are a list.
+
+Interactivity is detected properly, instead of being guessed:
+
+- **The non-interactive path no longer contradicts itself.** `isatty()` is not
+  enough on Windows: stdin redirected from `NUL` is a character device, so it
+  reports a TERMINAL. A scheduled task printed a numbered menu to nobody and
+  only learned the truth when `input()` raised EOFError — with the menu already
+  on screen, immediately followed by "running non-interactively". A real
+  console answers `GetConsoleMode` and `NUL` does not, despite both being
+  character devices, so that call is now the discriminator. Verified: under
+  `NUL`, `isatty()` says True while the new check says False. The EOFError
+  handlers stay as a second line of defence, and the suite now asserts the menu
+  is never printed to a non-interactive run.
+
+Language, and the standard's "any language" promise:
+
+- **Every localized term moved out of the code into
+  `scripts/languages.json`.** Eight separate tables hardcoded English and
+  Portuguese, so Section 10's "a base may be authored in any language" really
+  meant "either of two, and only by editing Python". The checker now unions the
+  recognition terms of every language in that file, and the bootstrap writes
+  using one of them. Adding a language is a data edit.
+- **`--lang` is optional**: the language is detected by counting how many
+  section headings match each language's vocabulary, and the scores are
+  printed. A tie or an empty base is reported as undecided rather than guessed.
+  An explicit `--lang` still wins.
+- Status values are the one exception to accent tolerance: they must match the
+  written spelling exactly, because the Overview's COUNTIF formulas do, and a
+  row reading `Em revisao` stops being counted no matter what the checker says.
+
+Also: the fixture's KB-017 gained a proper creation row so it exercises version
+divergence and nothing else — with a single 2.1 row it would now trip the new
+sequence rule too, putting two deliberate defects in one document. 16 test
+groups, 15 detection sections, 38 fixture problems.
+
+Documentation: the documented Python floor moved from "3.7 or newer" (inferred
+from the language features used) to "3.9 or newer" (what CI actually
+exercises), and HOW-TO-USE's own table of checks had fallen behind the
+README's.
+
 ## 0.8.4
 
 Windows portability, three report-correctness fixes, and one case of silent

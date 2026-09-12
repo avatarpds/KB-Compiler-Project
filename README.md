@@ -81,6 +81,8 @@ What it reports:
 | Header missing tab | Name and version glued together (`Namev1.2`), or separated by a space where a tab belongs (`Name v1.2`) |
 | Header missing its version | A header with no version at all, which is the case where the "header must match the Version History" rule silently stops being enforceable |
 | Unreadable documents | A file the spreadsheet points at that exists but cannot be parsed as a Word document |
+| Invalid Status | A Status cell that is empty or not one of `Active` / `In review` / `Legacy`, which silently stops the Overview's formulas counting it and can disable the legacy exemption |
+| Version History sequence | A history that doesn't start at the creation (1.0), or whose versions go backwards |
 | Structure violations | A required Section 3 heading missing, out of order, or content after Version History |
 | Folder/tab mismatch | A row on one category tab whose file physically lives in another folder |
 | Formatting violations | Margins, page orientation, title size/weight/color, non-native heading styles, callout shading and text color, footer presence and page fields, hyphen vs. dash in the header, bullet/numbered list formatting per section, all-caps author names, and a footer label that differs across the base |
@@ -101,8 +103,10 @@ To generate the spreadsheet directly:
 
 ```bash
 python3 skills/kb-compiler/scripts/bootstrap_master_list.py "<base path>" \
-    [--lang en|pt] [--owner "Name"] [--output PATH.xlsx] [--force]
+    [--lang CODE] [--owner "Name"] [--output PATH.xlsx] [--force]
 ```
+
+`--lang` is optional: the language is read off the documents themselves, by counting how many section headings match each language's vocabulary, and the detection and its scores are printed. Pass the flag only to override it, or when a base is too small or too inconsistent for the count to settle — a tie is reported as undecided rather than guessed. The available codes come from `scripts/languages.json`, which holds every localized term the tooling knows: **adding a language is an edit to that file, not to either script.** The checker recognizes the terms of every language listed there at once, so it reads a base in any of them without being told which.
 
 Run in a terminal, it asks where the index should live: the default name inside the base, a different name inside the base, or a full path of your choosing (it may sit outside the base entirely). `--output` makes the same choice non-interactively. Whatever you pick is recorded in a small `.kb-compiler.json` in the base, so **every later run uses that same file** — the index becomes a continuous insertion point rather than something re-derived from a file-name pattern each time. A configured path that has gone missing is an explicit error, never a silent fallback to some other spreadsheet.
 

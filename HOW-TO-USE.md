@@ -19,8 +19,9 @@ Two different things with different requirements — you may only need the first
 
 **To run the audit and bootstrap scripts yourself:**
 
-- **Python 3.7 or newer.** The scripts use nothing newer than 3.7 features;
-  they are developed and tested on 3.13. Check yours:
+- **Python 3.9 or newer.** Continuous integration runs the test suite on 3.9
+  and 3.13, on both Linux and Windows, so those are the versions actually
+  verified. Check yours:
 
   ```
   python --version
@@ -195,7 +196,11 @@ Paths are relative to the plugin's own folder, not to your current directory.
 | Name divergence | File name, title, header and index disagreeing |
 | Version divergence | Header, Version History and index disagreeing |
 | Legacy version table | A Version History still in the old column format |
-| Header missing tab | Name and version glued together (`Namev1.2`) |
+| Header missing tab | Name and version glued together (`Namev1.2`) or split by a space (`Name v1.2`) |
+| Header missing its version | A header carrying no version at all |
+| Version History sequence | A history that doesn't start at 1.0, or whose versions go backwards |
+| Invalid Status | A Status that is empty or not `Active` / `In review` / `Legacy` |
+| Unreadable documents | A file that exists but can't be opened as a Word document |
 | Structure violations | A required section missing, out of order, or content after Version History |
 | Folder/tab mismatch | A row on one category tab whose file lives in another folder |
 | Formatting violations | Margins, orientation, title, heading styles, callouts, footer, list formatting, author casing |

@@ -1,0 +1,67 @@
+name: tests
+
+# The matrix is the point. Both defects fixed in 0.8.4 were Windows-only — the
+# report crashed when redirected because stdout defaults to cp1252 there, and
+# the non-interactive guard never engaged because Windows reports a NUL stdin
+# as a terminal. Neither was reproducible on Linux, and neither would have
+# reached a release with this workflow in place.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  tests:
+    name: ${{ matrix.os }} / py${{ matrix.python }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      # Never cancel the rest of the matrix on one failure: when a defect is
+      # platform-specific, which combinations pass is the diagnosis.
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+        python: ["3.9", "3.13"]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+
+      - name: Install pinned dependencies
+        run: python -m pip install -r skills/kb-compiler/scripts/requirements.txt
+
+      - name: Test suite
+        run: python skills/kb-compiler/tests/run_tests.py
+
+      # The suite drives the scripts through subprocess pipes. This step runs
+      # the audit the way a person does — straight to the console — and then
+      # redirected to a file, which is the case that used to crash. An empty
+      # stderr is part of the assertion.
+      - name: Audit the fixture, to a console and to a file
+        shell: bash
+        run: |
+          python skills/kb-compiler/tests/build_fixture.py "$RUNNER_TEMP/fixture"
+          python skills/kb-compiler/scripts/check_master_list.py "$RUNNER_TEMP/fixture" || true
+          python skills/kb-compiler/scripts/check_master_list.py "$RUNNER_TEMP/fixture" \
+            > "$RUNNER_TEMP/report.txt" 2> "$RUNNER_TEMP/report.err" || true
+          if [ -s "$RUNNER_TEMP/report.err" ]; then
+            echo "::error::the audit wrote to stderr when redirected"
+            cat "$RUNNER_TEMP/report.err"
+            exit 1
+          fi
+          if ! grep -q "^SUMMARY:" "$RUNNER_TEMP/report.txt"; then
+            echo "::error::the redirected report has no SUMMARY line — it stopped early"
+            exit 1
+          fi
+
+      - name: Upload the report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: audit-report-${{ matrix.os }}-py${{ matrix.python }}
+          path: ${{ runner.temp }}/report.txt
+          if-no-files-found: warn

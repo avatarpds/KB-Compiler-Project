@@ -43,9 +43,9 @@ The **file name**, the Word **header**, the **title** (first line of the body), 
 2. **Purpose** (native Word Heading 1) — 1 to 3 sentences on what the document solves/teaches.
 3. **[Roles & Responsibilities]** (Heading 1) — when different user profiles have different paths.
 4. **[Naming Convention]** (Heading 1) — when there's a naming/code convention to explain before the step-by-step.
-5. **Prerequisites** (Heading 1) — **bulleted** list.
+5. **Prerequisites** (Heading 1 — the heading itself is always a heading, never a list item) — its items are a **list, bulleted or numbered**; pick whichever the rest of the document already uses. This section is required even when the procedure has none: in that case write a single item reading `N/A`. An explicit `N/A` says "the author considered this and there are none"; an absent section says nothing at all, and the two are indistinguishable to whoever reads the document later.
 6. **Step by Step** (Heading 1, can repeat as "Step by Step – <Context>" for alternate paths) — **numbered** (decimal) list, one imperative action per item.
-7. **[Verification]** (Heading 1) — bulleted list of success signals.
+7. **[Verification]** (Heading 1) — a list of success signals, bulleted or numbered, matching whatever the document already uses.
 8. **Version History** (Heading 1, always last) — table `Author | Version | Date | Change Description`. The first row is always the creation, version `1.0`. Older documents may have a table in the legacy format (`No. | Revision Date | Revision | Reviewer`) — when editing one of these, convert it to the new standard while preserving all history. **Be careful rewriting this table**: confirm whether the first visible row is really a column header or already data — some old tables have no separate header row, and overwriting the wrong row erases history by mistake.
 
 Warnings/callouts inside the step-by-step use the callout style from Section 4 (formatting).
@@ -57,8 +57,9 @@ Warnings/callouts inside the step-by-step use the callout style from Section 4 (
 - **Footer**: `<Organization/Team label confirmed in Section 0>  |  Knowledge Base\tPage <n> of <total>` (Word's automatic page fields).
 - **Title** (1st line of the body): "Normal" style, **bold**, **22pt**, color **RGB 1F3864** (dark blue).
 - **Sections**: native Word "Heading 1" style — never create a custom style copied from another document.
-- **Prerequisites/Verification lists**: bulleted, "List Paragraph" style (or "List Bullet").
+- **Prerequisites/Verification lists**: a list — bulleted or numbered, "List Paragraph" style (or "List Bullet"/"List Number"). What matters is that the items are a list rather than prose; the choice between bullet and number follows whatever the document already uses.
 - **Step-by-step lists**: decimal numbered, "List Paragraph" style (or "List Number").
+- **One numbering sequence per section**: every section that contains a numbered list gets its OWN sequence, restarting at 1. A document covering several topics gives each topic its own list. Word counts all paragraphs sharing a numbering id as a single continuous list in document order, so when two sections share one, the second carries on from the first — "Step by Step – Alternate" opening at 9. Nothing looks wrong on screen, because Word does show numbers; they are simply the wrong ones, and the defect only surfaces when someone is told to follow step 9 of a four-step procedure.
 - **Warning callout**: a paragraph with **FFF3CD** shading (background), **7B5C00** text color, starting with `⚠ `. Use sparingly, only for real risks.
 - **Author name**: always Title Case (e.g., "First Last"), never all caps.
 
@@ -130,6 +131,11 @@ Whenever this standard is applied to a brand-new knowledge base that doesn't hav
 6. Update the master-index spreadsheet (Section 7) and confirm before saving.
 7. Deliver the file and point out where screenshot placeholders need to be replaced.
 8. When fixing inconsistencies in bulk (an audit), handle one at a time, show the result before moving to the next, and always ask when there's a naming/content decision that isn't obvious — never assume silently.
+9. **When the audit reports a required section as missing, read the document before writing anything.** "Missing" as reported means "not found as a native Heading 1", which covers two very different situations:
+   - **The section exists but its heading is off-standard** — styled Normal, or Heading 2, or a custom style. This is the common case by far. Promote that heading to native Heading 1 and change nothing else. Do NOT author a new section: the content is already there, and adding one duplicates it.
+   - **The section genuinely does not exist.** Then read the document, synthesize the section from its actual content, and write it — for Purpose, one to three sentences on what the document solves; for Prerequisites, a single `N/A` bullet when the author defined none (see Section 3).
+
+   Either way it is an edit, so the critical version rule in Section 4 applies: bump the version, update the header, add a Version History row, and update the master-index spreadsheet. Because each of those costs a version, batch every fix a document needs into ONE pass rather than making separate passes for structure, header and formatting.
 
 ## 9. Ingesting a raw draft or another source format
 

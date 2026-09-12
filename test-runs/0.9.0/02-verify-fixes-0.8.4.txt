@@ -1,0 +1,20 @@
+$ python test-runs/0.8.4/probes/verify_fixes.py
+
+(the previous release's scenarios, re-run against 0.9.0)
+
+skill folder: C:\Users\Lucas\Documents\GITHUB\SAVE THERE\skills\kb-compiler
+
+[ OK ] UTF-8 report survives a redirect
+[ OK ] non-interactive stdin prints guidance
+[ OK ] colliding category names lose nothing
+[ OK ] space-separated header is a tab problem
+[ OK ] name ending in 'v2' keeps its name
+[ OK ] header with no version is reported
+[ OK ] unreadable document counts once
+[ OK ] extra Overview column keeps the mapping
+[ OK ] --force never indexes the index
+[ OK ] a clean base stays clean
+
+PASSED: 10 scenarios. Every 0.8.4 fix behaves as the changelog describes.
+
+exit code: 0

@@ -1,0 +1,23 @@
+A real 68-document knowledge base, audited with 0.9.0.
+
+This is the run that produced the release: three crashes/silent failures
+and two standard-versus-practice conflicts came out of it.
+
+=== Broken references (master-index spreadsheet → file) (0) ===
+=== Orphaned files (file → master-index spreadsheet) (0) ===
+=== Duplicate/shared codes (0) ===
+=== Name divergence (file/title/header/master-index spreadsheet) (21) ===
+=== Version divergence (header/history/master-index spreadsheet) (0) ===
+=== Version History table in the legacy format (9) ===
+=== Header missing the tab separator (name and version glued or space-separated) (23) ===
+=== Header missing its version (Section 4) (0) ===
+=== Unreadable documents (the file exists but cannot be parsed) (0) ===
+=== Invalid Status value (Section 7) (0) ===
+=== Version History sequence (Section 3) (2) ===
+=== Structure violations (Section 3 of the standard) (40) ===
+=== Ambiguous file reference (same name in several folders) (0) ===
+=== Folder/tab mismatch (0) ===
+=== Formatting violations (Section 4 of the standard) (127) ===
+--- Informational: formatting properties that could not be verified (12) ---
+--- Informational: files with a non-ASCII character in the name (27) ---
+SUMMARY: 222 problem(s) found. No file was changed by this script.

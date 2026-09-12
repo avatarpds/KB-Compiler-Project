@@ -1,0 +1,130 @@
+{
+  "_readme": [
+    "Every language-specific term the tooling knows, in one place.",
+    "",
+    "English is the standard's canonical language, but Section 10 says a base may",
+    "be authored in ANY language. The scripts used to contradict that: eight",
+    "separate tables hardcoded English and Portuguese, so 'any language' really",
+    "meant 'either of two, and only by editing Python'.",
+    "",
+    "TO ADD A LANGUAGE: copy one of the blocks below, translate the values, and",
+    "save. Nothing in the code changes. The checker unions the recognition terms",
+    "of every language listed here, so it keeps reading a base written in any of",
+    "them; the bootstrap writes using exactly one block, chosen by --lang or",
+    "detected from the documents themselves.",
+    "",
+    "Recognition lists are matched lowercased. Include the unaccented spelling",
+    "next to the accented one where people realistically type both — EXCEPT for",
+    "'status'. Those three values are matched exactly by the Overview's COUNTIF",
+    "formulas, so a row spelled 'Em revisao' stops being counted no matter what",
+    "this file says. Accepting the variant here would only hide that.",
+    "Single strings (spreadsheet_name, uncategorized, ...) are what gets WRITTEN,",
+    "so they carry their proper accents and capitalisation."
+  ],
+
+  "languages": {
+    "en": {
+      "display_name": "English",
+      "spreadsheet_name": "Master List",
+      "base_title": "Knowledge Base",
+      "overview_sheet": "Overview",
+      "overview_sheet_aliases": ["overview"],
+      "overview_headers": ["Category", "Total", "Active", "In review", "Tab"],
+      "tab_word": "Tab",
+      "uncategorized": "Uncategorized",
+      "legacy_folders": ["legacy"],
+      "index_headers": ["Code", "Document", "File", "Status", "Version",
+                        "Creation Date", "Last Updated", "Owner"],
+      "columns": {
+        "code": ["code"],
+        "document": ["document"],
+        "file": ["file"],
+        "status": ["status"],
+        "version": ["version"],
+        "creation_date": ["creation date"],
+        "last_updated": ["last updated"],
+        "owner": ["owner"]
+      },
+      "status": {
+        "active": ["active"],
+        "in_review": ["in review"],
+        "legacy": ["legacy"]
+      },
+      "status_written": {
+        "active": "Active",
+        "in_review": "In review",
+        "legacy": "Legacy"
+      },
+      "sections": {
+        "purpose": ["purpose"],
+        "prerequisites": ["prerequisites"],
+        "steps": ["step by step"],
+        "history": ["version history"],
+        "verification": ["verification"]
+      },
+      "history_headers": ["Author", "Version", "Date", "Change Description"],
+      "history_columns": {
+        "author": ["author"],
+        "version": ["version"],
+        "description": ["descri"]
+      },
+      "legacy_history_columns": {
+        "reviewer": ["reviewer"],
+        "revision": ["revision"]
+      },
+      "heading_style_markers": ["heading 1"]
+    },
+
+    "pt": {
+      "display_name": "Português",
+      "spreadsheet_name": "Lista Mestra",
+      "base_title": "Base de Conhecimento",
+      "overview_sheet": "Visão Geral",
+      "overview_sheet_aliases": ["visão geral", "visao geral"],
+      "overview_headers": ["Categoria", "Total", "Ativos", "Em revisão", "Aba"],
+      "tab_word": "Aba",
+      "uncategorized": "Sem Categoria",
+      "legacy_folders": ["legado"],
+      "index_headers": ["Código", "Documento", "Arquivo", "Status", "Versão",
+                        "Data de Criação", "Última Atualização", "Responsável"],
+      "columns": {
+        "code": ["código", "codigo"],
+        "document": ["documento"],
+        "file": ["arquivo"],
+        "status": ["status"],
+        "version": ["versão", "versao"],
+        "creation_date": ["data de criação", "data de criacao"],
+        "last_updated": ["última atualização", "ultima atualizacao"],
+        "owner": ["responsável", "responsavel"]
+      },
+      "status": {
+        "active": ["ativo"],
+        "in_review": ["em revisão"],
+        "legacy": ["legado"]
+      },
+      "status_written": {
+        "active": "Ativo",
+        "in_review": "Em revisão",
+        "legacy": "Legado"
+      },
+      "sections": {
+        "purpose": ["objetivo"],
+        "prerequisites": ["pré-requisitos", "pre-requisitos"],
+        "steps": ["passo a passo"],
+        "history": ["histórico de versões", "historico de versoes"],
+        "verification": ["verificação", "verificacao"]
+      },
+      "history_headers": ["Autor", "Versão", "Data", "Descrição da Alteração"],
+      "history_columns": {
+        "author": ["autor"],
+        "version": ["versão", "versao"],
+        "description": ["descri"]
+      },
+      "legacy_history_columns": {
+        "reviewer": ["revisor"],
+        "revision": ["revisão", "revisao"]
+      },
+      "heading_style_markers": ["título 1", "titulo 1"]
+    }
+  }
+}
