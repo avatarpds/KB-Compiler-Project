@@ -1,0 +1,59 @@
+A real 60-document knowledge base (63 indexed rows across six
+category tabs), audited with 0.9.1.
+
+Counts and section headings only. The base is a company's internal
+documentation; nothing from inside the documents is reproduced here.
+
+Three runs, in this order:
+
+  A. 0.9.0's checker, on the base as it stood          -> 252 problem(s) found.
+  B. 0.9.1's checker, on the SAME untouched base       -> 238 problem(s) found.
+  C. 0.9.1's checker, after remediating the base       -> 21 problem(s) found.
+
+A minus B is this release's false positives: 14 findings that were
+never defects. Measured against an identical base state, from a copy
+taken before any document was edited -- not inferred.
+
+B minus C is remediation: real defects fixed in the documents and the
+index, not checker changes.
+
+========================================================================
+Per section: B (before remediation) -> C (after)
+========================================================================
+  Sheets skipped entirely (no recognizable column-header row)                      0 ->    0
+  Broken references (master-index spreadsheet → file)                              5 ->    0   <-- changed
+  Orphaned files (file → master-index spreadsheet)                                 9 ->    4   <-- changed
+  Duplicate/shared codes                                                           1 ->    0   <-- changed
+  Name divergence (file/title/header/master-index spreadsheet)                    17 ->    1   <-- changed
+  Version divergence (header/history/master-index spreadsheet)                     4 ->    0   <-- changed
+  Version History table in the legacy format                                       9 ->    1   <-- changed
+  Header missing the tab separator (name and version glued or space-separated)    29 ->    0   <-- changed
+  Header missing its version (Section 4)                                           0 ->    0
+  Unreadable documents (the file exists but cannot be parsed)                      0 ->    0
+  Invalid Status value (Section 7)                                                 0 ->    0
+  Row with an empty Code cell (Section 2)                                          0 ->    0
+  Version History sequence (Section 3)                                             2 ->    2
+  Structure violations (Section 3 of the standard)                                54 ->    9   <-- changed
+  Ambiguous file reference (same name in several folders)                          0 ->    0
+  Folder/tab mismatch                                                              0 ->    0
+  Formatting violations (Section 4 of the standard)                              108 ->    4   <-- changed
+  Informational: formatting properties that could not be verified                 12 ->    9   <-- changed
+  Informational: files with a non-ASCII character in the name                     27 ->   28   <-- changed
+
+========================================================================
+False positives 0.9.1 stopped reporting (A -> B, same base)
+========================================================================
+  Structure violations (Section 3 of the standard)                                55 ->   54
+  Folder/tab mismatch                                                              2 ->    0
+  Formatting violations (Section 4 of the standard)                              119 ->  108
+
+What remains after C, all of it decision-shaped rather than mechanical:
+  - 3 documents needing a person: one empty, two needing content moved
+    between sections
+  - 2 Version Histories missing their creation row; inventing a 1.0 row
+    would fabricate an audit trail
+  - 1 document whose own defects became visible only once its broken
+    reference was fixed
+  - 4 supporting files (two spreadsheets, a PDF, a spreadsheet in
+    Legado/) the base owner chose to leave unindexed
+  - 2 sections written as prose that need to become lists

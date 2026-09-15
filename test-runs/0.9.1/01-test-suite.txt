@@ -1,0 +1,30 @@
+﻿[ OK ] detections
+[ OK ] bootstrap
+[ OK ] non-interactive safety
+[ OK ] invalid sheet characters
+[ OK ] numbered legacy folder
+[ OK ] invalid --lang rejected
+[ OK ] ambiguous spreadsheet
+[ OK ] sanitized tab / no false mismatch
+[ OK ] legacy status skips structure
+[ OK ] custom destination remembered
+[ OK ] out-of-base destination
+[ OK ] root-level documents indexed
+[ OK ] colliding category names
+[ OK ] Overview extra column
+[ OK ] --force never indexes the index
+[ OK ] language detected from the base
+[ OK ] skipped sheet is counted
+[ OK ] empty Code row reported once
+[ OK ] Office lock files are not orphans
+[ OK ] index look-alike .docx still checked
+[ OK ] shared bullets are clean
+[ OK ] typed page number reported
+[ OK ] direct numbering beats style name
+[ OK ] numbered headings recognized
+[ OK ] legacy on topical tab is fine
+[ OK ] dash inside the name is allowed
+[ OK ] ambiguous dates settled and disclosed
+[ OK ] languages.json keys validated
+
+PASSED: 28 test groups, 17 detection sections, 40 problems, 3 unverifiable.

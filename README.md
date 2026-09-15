@@ -1,4 +1,4 @@
-# KB-Compiler
+﻿# KB-Compiler
 
 A documentation standard for knowledge bases (KB), packaged as a Cowork/Claude plugin, with a deterministic validation script and a test suite.
 
@@ -72,7 +72,7 @@ What it reports:
 | Check | Detects |
 |---|---|
 | Broken references | A spreadsheet row pointing at a file that doesn't exist |
-| Orphaned files | A document with no row in the spreadsheet |
+| Orphaned files | A document with no row in the spreadsheet (Office lock files and OS junk — `~$…`, `Thumbs.db`, `.DS_Store` — are never counted) |
 | Ambiguous file reference | A bare file name that exists in several folders, where the row's tab doesn't single one out |
 | Duplicate codes | The same `KB-XXX` on two different rows |
 | Name divergence | File name, title, header and spreadsheet disagreeing |
@@ -82,6 +82,8 @@ What it reports:
 | Header missing its version | A header with no version at all, which is the case where the "header must match the Version History" rule silently stops being enforceable |
 | Unreadable documents | A file the spreadsheet points at that exists but cannot be parsed as a Word document |
 | Invalid Status | A Status cell that is empty or not one of `Active` / `In review` / `Legacy`, which silently stops the Overview's formulas counting it and can disable the legacy exemption |
+| Sheet skipped entirely | A tab with no recognizable `Code` column, so nothing on it could be checked — counted as a problem, because a run that skipped a whole sheet must not report a clean base |
+| Row with an empty Code | A row with a document and a file but a blank `Code` cell, which used to be dropped in silence and resurface as an "orphaned file" |
 | Version History sequence | A history that doesn't start at the creation (1.0), or whose versions go backwards |
 | Structure violations | A required Section 3 heading missing, out of order, or content after Version History |
 | Folder/tab mismatch | A row on one category tab whose file physically lives in another folder |
@@ -130,7 +132,7 @@ pip install -r skills/kb-compiler/scripts/requirements.txt
 python3 skills/kb-compiler/tests/run_tests.py
 ```
 
-15 groups, in three families plus a growing set of named regressions:
+28 groups, in three families plus a growing set of named regressions:
 
 **Detections.** `build_fixture.py` builds a synthetic base with one deliberate instance of every problem the checker catches, plus cases that must stay clean: a fully conforming document; one whose formatting is inherited from its style rather than set on the run; a document written entirely in another language; a name that legitimately ends in something version-shaped (`... Office v2`); attachment files that must never be flagged as orphans; an accented file name stored in NFD form. The suite compares every report section's count against the expected value.
 

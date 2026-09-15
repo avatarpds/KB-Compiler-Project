@@ -2,6 +2,171 @@
 
 All notable changes to this project are documented here.
 
+## 0.9.1
+
+Found by auditing a real 60-document base (63 indexed rows across six category
+tabs) and then probing each suspicion on a synthetic one. Nothing here was
+reproducible on the fixture as it stood, and the suite was green throughout —
+every one of these is a branch the fixture never walked.
+
+- **A skipped sheet is now a finding, not a footnote.** A tab with no
+  recognizable `Code` column printed a `WARNING` and contributed nothing to the
+  count, so a base whose sheet had lost its header row reported
+  `SUMMARY: 0 problem(s) found` and exited `0` — the documented "clean" signal
+  a CI gate keys on — while an entire sheet went unchecked. Whether the exit
+  code happened to be non-zero at all depended on orphan detection incidentally
+  firing for the same documents.
+
+- **Bullets no longer count as a shared numbering sequence.** The check
+  collected every direct `w:numId` without consulting `numFmt`, so two
+  *bulleted* sections sharing one definition were reported as "the second
+  continues the first's count" — meaningless for bullets, which have no
+  counter, and something Word does routinely because it reuses one definition
+  for identical bullet formatting. On the real base this was **9 of 19
+  findings from that check, every one of them false**. The ordered case still
+  fires; an unresolvable definition is left alone, as the rest of the
+  formatting checks already do.
+
+  The fixture's own case for this was unfaithful: it pinned two `List Number`
+  paragraphs to `numbering.findall(w:num)[0]`, which is the *bullet*
+  definition created moments earlier by the document's first bulleted
+  prerequisite. Those paragraphs rendered as bullets, so the document never
+  modeled the defect — the test passed only because the checker ignored
+  `numFmt`. It now resolves the decimal definition explicitly, and a bulleted
+  counter-case sits beside it.
+
+- **A row with a blank `Code` is reported.** It used to be skipped whole-cloth:
+  nothing named the row, and the document it indexes then resurfaced as an
+  "orphaned file", sending the reader after the file instead of the row that is
+  actually wrong. Section 2's `—` marker exists precisely so a document without
+  a code stays visible in the index. Reported once — the row still references
+  its file, so it is no longer also an orphan. A whitespace-only cell counts as
+  blank, since that is how it reads to everyone.
+
+- **Office lock files and OS junk are never orphans.** Auditing a base while a
+  single document was open in Word reported that document's `~$…` lock file as
+  an orphaned file — a finding that vanishes on its own, which is the fastest
+  way to make a report look untrustworthy. `~$…`, `.~lock.…#`, `Thumbs.db`,
+  `.DS_Store` and `desktop.ini` are now invisible to the audit. `.gitignore`
+  had excluded them from the repository all along; the checker had not.
+
+- **A `.docx` named like the index is still checked.** `is_master_list_filename`
+  matched on the name prefix with no extension check, so a document called
+  `Master List Guidelines.docx` was taken for the index itself and excluded
+  from orphan detection — an unindexed document that never appeared in the
+  report at all. Now the extension is required, and the prefix is compared
+  case-insensitively.
+
+- **The name comparison normalizes all four sources.** Every *file-name*
+  comparison already went through `nfc()`, but the four-source name check
+  normalized only the file side — so an accented name authored NFD (a document
+  that passed through macOS) and recorded NFC in the index was reported as a
+  name divergence between two strings that are the same text, with a
+  recommendation to "fix" one of them.
+
+- **The footer's page number must be a real field.** `has_page_field` tested
+  the footer XML for the substring `PAGE`, so a footer reading
+  `ACME HOMEPAGE | Knowledge Base` was credited with an automatic page field it
+  did not have and its typed-in page number went unreported. Now the field
+  instructions are inspected, on a word boundary — ` NUMPAGES ` contains
+  `PAGE`, and a total-pages field is not a current-page number.
+
+- **The Overview tab is recognized in any casing.** Matching its literal
+  spelling meant a tab renamed `OVERVIEW` stopped being recognized, was read as
+  a category sheet, found no `Code` column and was skipped — silently losing
+  the tab-to-category map that exists to prevent false folder/tab mismatches.
+
+- **A half-finished `languages.json` fails loudly.** Adding a language is
+  documented as a data edit to that file, but the module-level tables index
+  some keys directly, and a missing one raised a bare `KeyError` at *import*
+  time — before `main()` exists to catch it — which exits `1`. That is this
+  tool's own "problems found" code, so a broken vocabulary was
+  indistinguishable from a completed audit to anything reading the exit status.
+  The required keys are validated where the file is loaded, with the graceful
+  error and exit `2` that path already promised.
+
+Four more, found while remediating that base rather than only auditing it:
+
+- **Direct numbering beats the style name.** `_list_format` read the style name
+  first, so a paragraph styled `List Number` whose own `w:numPr` points at a
+  bullet definition was called decimal — while Word renders it as a bullet. The
+  three sources are now consulted in Word's order of precedence: the
+  paragraph's numbering, then its style's, then the style name as a fallback
+  for the built-in list styles. This is how the fixture's shared-numbering case
+  hid its own unfaithfulness for two releases.
+
+- **Ambiguous dates are settled by the base, and disclosed.** `parse_date_value`
+  tried `%d/%m/%Y` unconditionally, so an English base's `03/04/2026` read as
+  3 April. It now takes the order from the language recorded in
+  `.kb-compiler.json`, defaulting to day-first so every existing base reads
+  exactly as before, and `date_is_ambiguous()` marks the dates where the
+  convention actually changes the answer. The name-divergence recommendation
+  states the reading it used instead of presenting one as fact.
+
+- **Numbered section headings are recognized.** Section matching is
+  `startswith()` against the bare vocabulary term, so a heading reading
+  `3. Pré-requisitos` was invisible: the structure check called the section
+  missing, and — silently — the per-section list rule skipped it, leaving a
+  numbered document's Step by Step never verified to be a numbered list.
+  Numbering sections is not something the standard forbids.
+
+- **An em dash inside a document's own name is allowed.** Section 4
+  constrains the separator *between the code and the name*: "Use a regular
+  hyphen `-`, never an en/em dash, between the code and the name." The check
+  searched the entire header, so
+  `KB-004 - Alterar Data de Expiração — Contingent Worker no SuccessFactors`
+  was reported as using the wrong separator — which reads as an instruction to
+  strip punctuation out of your own title. Only the code-to-name separator is
+  examined now, on a header that actually carries a code. Two false positives
+  on the real base.
+
+- **A superseded document may stay on its topical tab.** Section 7 offers
+  legacy documents two homes in the index: their own Legacy tab, or their
+  original topical tab with Status `Legacy`. The folder/tab check only
+  tolerated the first, and reported the second as a mismatch telling the reader
+  to "move the file or move the row" — undoing an arrangement the standard had
+  offered them. The checker contradicted the spec it enforces.
+
+The suite grew from 16 groups to 28. Every new group was confirmed to fail
+against 0.9.0's checker before being kept: two of them are the reason the
+`Formatting violations` count alone could not have caught this release's
+defects, because the bullet false positive (+1) and the missed typed page
+number (-1) cancelled out exactly.
+
+Two rules were added to the standard itself. Both are mistakes made while
+remediating that base, and neither was something SKILL.md did anything to
+prevent:
+
+- **A new Version History row must inherit the formatting of the rows already
+  there** (Section 3.8). Font, size and colour are set on the runs rather than
+  on the table style, so a row added programmatically states nothing and falls
+  back to the document's defaults — rendering larger and in a different colour
+  than every row above it. It is immediately visible to a reader and the audit
+  does not check it. Cell borders and shading live on the cell, so they carry
+  over on their own.
+
+- **Remediate each document exactly once** (Section 8.8). Applying a batch in
+  more than one sweep — formatting first, missing sections afterwards — gives
+  every document caught by both two version bumps and two near-identical
+  Version History rows, which is the outcome the batching rule in 8.9 exists to
+  avoid. It affected 27 documents before being caught and repaired.
+
+Measured, on an identical base state. A copy of the base was taken before any
+document was edited, so both checker versions could run against byte-identical
+input:
+
+| Run | Findings |
+|---|---|
+| 0.9.0's checker, base untouched | 252 |
+| 0.9.1's checker, **same** untouched base | 238 |
+| 0.9.1's checker, after remediating the base | 21 |
+
+The first gap — **14 findings** — is this release's false positives: things that
+were never defects. The second is real repair. Nothing that was a true positive
+stopped being reported: every disappearance was checked against the previous
+report, category by category. The evidence is in
+[`test-runs/0.9.1/`](test-runs/0.9.1/).
+
 ## 0.9.0
 
 Continuous integration, and two rules the standard has always stated that

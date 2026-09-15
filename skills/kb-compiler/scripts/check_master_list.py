@@ -175,6 +175,27 @@ def load_languages(path=LANGUAGES_FILE):
     if not isinstance(langs, dict) or not langs:
         print("ERROR: %s has no 'languages' section." % os.path.basename(path))
         sys.exit(2)
+    # Validate the keys the module-level tables below index DIRECTLY. Adding a
+    # language is documented as a data edit to this file, so a half-finished
+    # entry is an expected mistake — and without this it surfaced as a bare
+    # `KeyError` traceback at import time, which exits 1. That is this tool's
+    # own "problems found" code, so a broken vocabulary was indistinguishable
+    # from a completed audit in any wrapper keying on the exit status. The
+    # __main__ handler cannot catch it: the failure happens before main runs.
+    for code, vocab in sorted(langs.items()):
+        if not isinstance(vocab, dict):
+            print("ERROR: language %r in %s is not an object."
+                  % (code, os.path.basename(path)))
+            sys.exit(2)
+        missing = [k for k in ("overview_sheet", "spreadsheet_name")
+                   if not str(vocab.get(k) or "").strip()]
+        if missing:
+            print("ERROR: language %r in %s is missing required key(s): %s. "
+                  "Every language needs at least these, because the audit's "
+                  "sheet-skipping and spreadsheet-detection tables are built "
+                  "from them."
+                  % (code, os.path.basename(path), ", ".join(missing)))
+            sys.exit(2)
     return langs
 
 
@@ -204,9 +225,20 @@ def _union_map(section):
 
 
 # Overview/summary tab names to skip when scanning category tabs.
-SKIP_SHEETS = {v["overview_sheet"] for v in LANGUAGES.values()} | {
-    alias for v in LANGUAGES.values() for alias in v.get("overview_sheet_aliases", [])
-} | {alias.title() for v in LANGUAGES.values() for alias in v.get("overview_sheet_aliases", [])}
+#
+# Compared case-insensitively. Matching the literal spelling meant a tab renamed
+# "OVERVIEW" stopped being recognized as the Overview: it was then read as a
+# category sheet, found no Code column, and was skipped — which silently lost
+# the tab -> category map that exists to prevent false folder/tab mismatches.
+SKIP_SHEETS = {v["overview_sheet"].strip().lower() for v in LANGUAGES.values()} | {
+    alias.strip().lower()
+    for v in LANGUAGES.values() for alias in v.get("overview_sheet_aliases", [])
+}
+
+
+def is_overview_sheet(sheet_name):
+    """True for the Overview/summary tab in any language, in any casing."""
+    return (sheet_name or "").strip().lower() in SKIP_SHEETS
 
 # Master-index spreadsheet naming conventions to auto-detect.
 MASTER_LIST_NAME_PATTERNS = tuple(
@@ -267,6 +299,11 @@ DASHES = ("\u2013", "\u2014")  # en dash, em dash — the standard requires a pl
 # their own master-index row — they're dependencies of the KB they sit under,
 # not documents in their own right.
 ATTACHMENT_DIR_SUFFIXES = ("- files",)
+
+# The folder a superseded document lives in, per Section 1. Taken from the
+# vocabulary file so adding a language stays a data edit, with the English term
+# as a floor in case a language omits it.
+LEGACY_FOLDER_NAMES = {t for t in _union("legacy_folders")} | {"legacy"}
 
 # Column names recognized in the master-index spreadsheet's header row, in
 # Portuguese (this plugin's original base) and English, so rows are read by
@@ -423,11 +460,38 @@ def find_master_list(base_dir, explicit_name=None):
 
 
 def is_master_list_filename(basename):
+    """
+    True only for a file that could actually BE a master index.
+
+    The extension check is the point: matching on the name prefix alone meant a
+    document called "Master List Guidelines.docx" was treated as the index and
+    silently excluded from orphan detection — an unindexed document that never
+    appeared in the report at all. Compared case-insensitively, since the
+    patterns are globbed case-insensitively on Windows but not on Linux.
+    """
+    lowered = (basename or "").lower()
+    if not lowered.endswith(".xlsx"):
+        return False
     for pattern in MASTER_LIST_NAME_PATTERNS:
-        prefix = pattern.split("*")[0]
-        if basename.startswith(prefix):
+        prefix = pattern.split("*")[0].lower()
+        if lowered.startswith(prefix):
             return True
     return False
+
+
+# Files that are never indexable documents: Office lock files, and the junk
+# Windows/macOS leave in a synced folder. Without this, auditing a base while a
+# single document was open in Word reported its "~$" lock file as an orphan —
+# a finding that disappears on its own and makes the report look unreliable.
+IGNORED_BASENAMES = frozenset(("thumbs.db", ".ds_store", "desktop.ini"))
+
+
+def is_ignorable_file(basename):
+    lowered = (basename or "").strip().lower()
+    if lowered in IGNORED_BASENAMES:
+        return True
+    # "~$Doc.docx" (Word/Excel) and ".~lock.Doc.docx#" (LibreOffice).
+    return lowered.startswith("~$") or lowered.startswith(".~lock.")
 
 
 def is_inside_attachment_folder(rel_path):
@@ -473,13 +537,42 @@ def map_columns(header_cells):
     return mapping
 
 
-def parse_date_value(value):
+_SLASH_DATE = re.compile(r"^(\d{1,2})[/-](\d{1,2})[/-](\d{4})$")
+
+
+def date_is_ambiguous(value):
+    """
+    True for a TEXT date whose first two fields could each be the day or the
+    month, and which therefore means two different dates depending on the
+    convention — "03/04/2026" is 3 April or 4 March.
+
+    A real Excel date cell is never ambiguous: it carries a date, not a
+    rendering. Neither is "13/04/2026", where only one reading is a valid
+    month, nor "05/05/2026", where both readings agree.
+    """
+    if value is None or isinstance(value, (datetime.date, datetime.datetime)):
+        return False
+    m = _SLASH_DATE.match(str(value).strip())
+    if not m:
+        return False
+    first, second = int(m.group(1)), int(m.group(2))
+    return first != second and first <= 12 and second <= 12
+
+
+def parse_date_value(value, day_first=True):
     """
     Best-effort parse of a spreadsheet date-like cell into a date, whether
     it's a real datetime/date (the normal case for an Excel date cell) or
     plain text (e.g. a "Last Updated" column typed in as a string instead of
     a real date). Returns None if the value is empty or couldn't be parsed
     as a date in any of the tried formats.
+
+    `day_first` picks which reading wins for an ambiguous text date. The
+    caller passes the base's own convention, taken from the language recorded
+    in its configuration: trying %d/%m/%Y unconditionally meant an English
+    base's "03/04/2026" was read as 3 April. Where it genuinely cannot be
+    settled, date_is_ambiguous() lets the report say so rather than presenting
+    one reading as fact.
     """
     if value is None:
         return None
@@ -490,7 +583,9 @@ def parse_date_value(value):
     text = str(value).strip()
     if not text:
         return None
-    for fmt in ("%d/%m/%Y", "%Y-%m-%d", "%m/%d/%Y"):
+    orders = (("%d/%m/%Y", "%Y-%m-%d", "%m/%d/%Y") if day_first
+              else ("%m/%d/%Y", "%Y-%m-%d", "%d/%m/%Y"))
+    for fmt in orders:
         try:
             return datetime.datetime.strptime(text, fmt).date()
         except ValueError:
@@ -509,6 +604,8 @@ def index_real_files(base_dir):
     by_path = {}
     for root, _dirs, files in os.walk(base_dir):
         for f in files:
+            if is_ignorable_file(f):
+                continue
             full = os.path.join(root, f)
             rel = os.path.relpath(full, base_dir).replace(os.sep, "/")
             f_norm = nfc(f)
@@ -757,7 +854,7 @@ def read_tab_category_map(wb):
     """
     mapping = {}
     for sheet_name in wb.sheetnames:
-        if sheet_name not in SKIP_SHEETS:
+        if not is_overview_sheet(sheet_name):
             continue
         ws = wb[sheet_name]
         for row in ws.iter_rows(values_only=True):
@@ -869,6 +966,20 @@ def _rgb_str(value):
     return str(value).upper() if value is not None else None
 
 
+# A leading enumerator on a heading: "1. ", "2) ", "3 - ", "4: ". Stripped
+# before the heading is matched against the section vocabulary, because that
+# matching is startswith() against the bare term and could not see past it — a
+# document whose sections read "1. Objetivo / 2. Pré-requisitos / 3. Passo a
+# Passo" had every one of them reported missing. Numbering the sections is not
+# something the standard forbids, and real bases do it.
+_HEADING_ENUMERATOR = re.compile(r"^\s*\d+\s*[.)\-:]\s*")
+
+
+def _heading_key(text):
+    """A heading lowercased and stripped of a leading enumerator."""
+    return _HEADING_ENUMERATOR.sub("", (text or "").strip().lower())
+
+
 # Section 3 required headings, in the order the standard mandates. Optional
 # sections (Roles & Responsibilities, Naming Convention, Verification) may sit
 # between them, and an extra custom heading is allowed — the standard doesn't
@@ -888,52 +999,105 @@ def _list_format(paragraph, doc):
     style, so the style name alone can't tell them apart — the numbering part
     has to be consulted.
     """
-    # A paragraph can get its list formatting three ways, in this order of
-    # specificity. Only checking direct numbering flags documents that use
-    # Word's built-in List Bullet / List Number styles — where the numbering
-    # lives in the style definition, not on the paragraph — as if they were not
-    # lists at all.
+    # A paragraph can get its list formatting three ways. They are consulted in
+    # WORD's order of precedence, which is not the order of convenience:
+    #
+    #   1. the paragraph's own w:numPr  — direct formatting, applied over all
+    #   2. its style's w:numPr          — where List Bullet / List Number live
+    #   3. the style's NAME             — last resort, when neither resolves
+    #
+    # Reading the style name first was wrong: a paragraph styled "List Number"
+    # whose own numbering points at a bullet definition renders as a bullet,
+    # and was reported as "decimal". That is exactly how the fixture's own
+    # shared-numbering case managed to claim it modelled a numbered list while
+    # the numbering part said bullet. The style name still has to stay as a
+    # fallback, though — checking numbering alone flags documents using the
+    # built-in list styles, whose numbering lives in the style definition, as
+    # if they were not lists at all.
+    sources = []
+    pPr = paragraph._p.pPr
+    direct = pPr.find(qn("w:numPr")) if pPr is not None else None
+    if direct is not None:
+        sources.append(direct)
+    style_element = getattr(getattr(paragraph, "style", None), "element", None)
+    style_pPr = style_element.find(qn("w:pPr")) if style_element is not None else None
+    style_numPr = style_pPr.find(qn("w:numPr")) if style_pPr is not None else None
+    if style_numPr is not None:
+        sources.append(style_numPr)
+
+    for numPr in sources:
+        num_id_el = numPr.find(qn("w:numId"))
+        if num_id_el is None:
+            continue
+        fmt = _numbering_format(doc, num_id_el.get(qn("w:val")))
+        if fmt is not None:
+            return "bullet" if fmt == "bullet" else "decimal"
+
     style_name = _style_name(paragraph)
     if "list bullet" in style_name:
         return "bullet"
     if "list number" in style_name:
         return "decimal"
 
-    pPr = paragraph._p.pPr
-    numPr = pPr.find(qn("w:numPr")) if pPr is not None else None
-    if numPr is None:
-        style_element = getattr(paragraph.style, "element", None)
-        style_pPr = style_element.find(qn("w:pPr")) if style_element is not None else None
-        numPr = style_pPr.find(qn("w:numPr")) if style_pPr is not None else None
-    if numPr is None:
-        return None
-    num_id_el = numPr.find(qn("w:numId"))
-    if num_id_el is None:
-        return "unknown"
-    num_id = num_id_el.get(qn("w:val"))
+    # A list item whose definition nothing could resolve is "unknown"; a
+    # paragraph that is not a list item at all is None. The distinction is what
+    # keeps an unresolvable list out of the violation count.
+    return "unknown" if sources else None
+
+
+def _has_page_field(footer):
+    """
+    True when the footer contains a Word PAGE field.
+
+    Tested against the field instructions, not the raw XML. Searching the XML
+    for the substring "PAGE" meant any footer whose TEXT happened to contain it
+    — "ACME HOMEPAGE | Knowledge Base" — was credited with an automatic page
+    field it doesn't have, so a typed-in page number went unreported. The word
+    boundary matters too: " NUMPAGES " contains "PAGE", and a footer carrying
+    only a total-pages field still has no current-page number.
+    """
+    element = getattr(footer, "_element", None)
+    if element is None:
+        return False
+    for el in element.iter():
+        if el.tag == qn("w:fldSimple"):
+            instr = el.get(qn("w:instr")) or ""
+        elif el.tag == qn("w:instrText"):
+            instr = el.text or ""
+        else:
+            continue
+        if re.search(r"\bPAGE\b", instr, re.IGNORECASE):
+            return True
+    return False
+
+
+def _numbering_format(doc, num_id):
+    """
+    The resolved numFmt at level 0 for a numId ("decimal", "bullet", ...), or
+    None when the numbering definition can't be resolved.
+    """
     try:
         numbering = doc.part.numbering_part.element
     except (AttributeError, KeyError, ValueError):
-        return "unknown"
+        return None
     for num in numbering.findall(qn("w:num")):
         if num.get(qn("w:numId")) != num_id:
             continue
         abstract = num.find(qn("w:abstractNumId"))
         if abstract is None:
-            return "unknown"
+            return None
         abstract_id = abstract.get(qn("w:val"))
         for a in numbering.findall(qn("w:abstractNum")):
             if a.get(qn("w:abstractNumId")) != abstract_id:
                 continue
             lvl = a.find(qn("w:lvl"))
             if lvl is None:
-                return "unknown"
+                return None
             fmt = lvl.find(qn("w:numFmt"))
             if fmt is None:
-                return "unknown"
-            value = (fmt.get(qn("w:val")) or "").lower()
-            return "bullet" if value == "bullet" else "decimal"
-    return "unknown"
+                return None
+            return (fmt.get(qn("w:val")) or "").lower()
+    return None
 
 
 def _footer_signals(doc):
@@ -943,10 +1107,8 @@ def _footer_signals(doc):
     except (IndexError, AttributeError):
         return None, False, False
     text = "".join(p.text for p in footer.paragraphs).strip()
-    xml = footer._element.xml if hasattr(footer, "_element") else ""
-    has_page_field = "PAGE" in xml
     has_tab = any("\t" in p.text for p in footer.paragraphs)
-    return text, has_tab, has_page_field
+    return text, has_tab, _has_page_field(footer)
 
 
 def parse_version(text):
@@ -1024,7 +1186,7 @@ def check_document_structure(d, label):
     if not headings:
         return ["%s: no Heading 1 sections found — the document has no recognizable structure" % label]
 
-    lowered = [h.lower() for h in headings]
+    lowered = [_heading_key(h) for h in headings]
     positions = {}
     for key, synonyms in REQUIRED_SECTIONS:
         idx = next((i for i, h in enumerate(lowered)
@@ -1202,26 +1364,34 @@ def check_document_formatting(d, label):
         header_text = "".join(p.text for p in d.sections[0].header.paragraphs)
     except (IndexError, AttributeError):
         header_text = ""
-    for dash in DASHES:
-        if dash in header_text:
-            violations.append(
-                "%s: the header uses '%s' between code and name; the standard "
-                "requires a plain hyphen '-'" % (label, dash)
-            )
-            break
+    # Only the separator BETWEEN THE CODE AND THE NAME is constrained. Scanning
+    # the whole header flagged a document whose own name contains an em dash
+    # ("KB-004 - Alterar Data de Expiração — Contingent Worker no
+    # SuccessFactors"), which reads as an instruction to strip punctuation out
+    # of the title — something Section 4 never asked for. A header with no code
+    # has no such separator, so nothing is checked.
+    separator = re.match(r"^\s*KB-\d+\s*([%s])" % "".join(DASHES), header_text)
+    if separator:
+        violations.append(
+            "%s: the header uses '%s' between code and name; the standard "
+            "requires a plain hyphen '-'" % (label, separator.group(1))
+        )
 
     # --- list formatting per section, only where the section has content ---
     headings = []
     for i, p in enumerate(d.paragraphs):
         style_name = _style_name(p)
         if any(marker in style_name for marker in HEADING_STYLE_MARKERS):
-            headings.append((i, p.text.strip().lower()))
+            # The original text is what the report shows; the stripped key is
+            # what gets matched, so "3. Passo a Passo" is recognized as the
+            # Step by Step section instead of being skipped unchecked.
+            headings.append((i, p.text.strip().lower(), _heading_key(p.text)))
 
-    for pos, (idx, title) in enumerate(headings):
+    for pos, (idx, title, key) in enumerate(headings):
         accepted = None
-        if any(title.startswith(x) for x in ANY_LIST_SECTIONS):
+        if any(key.startswith(x) for x in ANY_LIST_SECTIONS):
             accepted = ("bullet", "decimal")
-        elif any(title.startswith(x) for x in NUMBERED_SECTIONS):
+        elif any(key.startswith(x) for x in NUMBERED_SECTIONS):
             accepted = ("decimal",)
         if accepted is None:
             continue
@@ -1260,7 +1430,17 @@ def check_document_formatting(d, label):
             continue
         num_id = numPr.find(qn("w:numId"))
         if num_id is not None and num_id.get(qn("w:val")):
-            per_section[-1][1].add(num_id.get(qn("w:val")))
+            value = num_id.get(qn("w:val"))
+            # Only ORDERED lists can carry a count from one section into the
+            # next. Bullets share a numbering definition all the time — Word
+            # reuses one for identical bullet formatting — and sharing it is
+            # harmless, because there is no number on screen to be wrong. On a
+            # real base this was 9 of 19 findings from this check, every one of
+            # them false. An unresolvable definition is left alone too, the
+            # same conservative rule the rest of the formatting checks follow.
+            fmt = _numbering_format(d, value)
+            if fmt is not None and fmt not in ("bullet", "none"):
+                per_section[-1][1].add(value)
 
     owner = {}
     for heading, num_ids in per_section:
@@ -1469,6 +1649,12 @@ def check(base_dir, master_list_name=None):
 
     by_basename, by_path = index_real_files(base_dir)
 
+    # Which way round a typed "03/04/2026" should be read. Recorded by the
+    # bootstrap in .kb-compiler.json; day-first stays the default, since that is
+    # what every base written before this existed was already read as.
+    base_language = str(read_config(base_dir).get("language") or "").strip().lower()
+    day_first = not base_language.startswith("en")
+
     wb = openpyxl.load_workbook(master_path, data_only=True)
     tab_to_category = read_tab_category_map(wb)
 
@@ -1480,6 +1666,7 @@ def check(base_dir, master_list_name=None):
     header_missing_tab_issues = []
     header_missing_version_issues = []
     invalid_status_issues = []
+    missing_code_issues = []
     version_sequence_issues = []
     unreadable_document_issues = []
     formatting_issues = []
@@ -1493,7 +1680,7 @@ def check(base_dir, master_list_name=None):
     sheets_without_header = []
 
     for sheet_name in wb.sheetnames:
-        if sheet_name in SKIP_SHEETS:
+        if is_overview_sheet(sheet_name):
             continue
         ws = wb[sheet_name]
         rows = list(ws.iter_rows(values_only=True))
@@ -1516,9 +1703,41 @@ def check(base_dir, master_list_name=None):
             return row[idx] if idx is not None and idx < len(row) else None
 
         for row in rows[header_idx + 1:]:
-            if not row or not cell(row, "code"):
+            if not row:
                 continue
-            codigo = str(cell(row, "code")).strip()
+            raw_code = cell(row, "code")
+            codigo = str(raw_code).strip() if raw_code is not None else ""
+            if not codigo:
+                # A row with real content but an empty Code used to be dropped
+                # in silence: nothing reported the row, and the document it
+                # indexes then resurfaced as an "orphan", pointing at the file
+                # instead of at the row that is actually wrong. Section 2 has
+                # the "—" marker precisely so a document without a code is
+                # still visible in the index. A whitespace-only cell counts as
+                # empty here, since it reads as blank to everyone.
+                if cell(row, "document") or cell(row, "file"):
+                    missing_code_issues.append(
+                        "[%s] the row for '%s' (file '%s') has an empty Code "
+                        "cell, so the whole row was skipped. Section 2 requires "
+                        "a code, or the '%s' marker for a document that "
+                        "legitimately has none — never a blank."
+                        % (sheet_name, cell(row, "document"),
+                           cell(row, "file"), NO_CODE_MARKER)
+                    )
+                # The row is broken, but it DOES point at this file, so the
+                # file is not unindexed. Recording it keeps one defect to one
+                # finding, instead of also reporting the document as an orphan
+                # and sending the reader after the wrong thing — the same rule
+                # the unreadable-document handling below follows.
+                referenced = cell(row, "file")
+                if referenced:
+                    referenced = nfc(str(referenced))
+                    if "/" in referenced:
+                        referenced_files.add(referenced)
+                    else:
+                        for match in by_basename.get(referenced, []):
+                            referenced_files.add(match)
+                continue
             documento = cell(row, "document")
             arquivo = cell(row, "file")
             status = cell(row, "status")
@@ -1679,7 +1898,17 @@ def check(base_dir, master_list_name=None):
             # name; the Overview records which category each tab represents.
             expected = tab_to_category.get(sheet_name, sheet_name)
             expected_label = strip_numeric_prefix_for_compare(expected)
-            if folder_label and folder_label.lower() != expected_label.lower():
+            # A superseded document in the Legacy folder whose row stayed on its
+            # topical tab is EXPLICITLY allowed by Section 7 ("they can stay
+            # listed in their original topical category tab (with Status =
+            # 'Legacy') or get their own 'Legacy' tab"). Reporting it told the
+            # reader to undo an arrangement the standard offers them, which is
+            # worse than saying nothing at all.
+            is_legacy_row = str(status or "").strip().lower() in LEGACY_STATUS_LABELS
+            in_legacy_folder = folder_label.strip().lower() in LEGACY_FOLDER_NAMES
+            if (folder_label
+                    and folder_label.lower() != expected_label.lower()
+                    and not (is_legacy_row and in_legacy_folder)):
                 folder_mismatch_issues.append(
                     f"{label} ('{documento}'): the row is filed under category "
                     f"'{expected_label}', but the file is in folder '{folder}'. "
@@ -1742,11 +1971,30 @@ def check(base_dir, master_list_name=None):
                 "header": header_name,
                 "master-index spreadsheet (Document column)": spreadsheet_name,
             }
-            unique_names = set(v for v in candidates.values() if v)
+            # Compared NFC-normalized, for the same reason every file-name
+            # comparison is (see nfc()): the file side was already normalized,
+            # but the title, header and spreadsheet sides were not — so an
+            # accented name authored as NFD and recorded as NFC was reported as
+            # a name divergence between two strings that are the same text,
+            # with a recommendation to "fix" one of them.
+            unique_names = set(nfc(v) for v in candidates.values() if v)
             if len(unique_names) > 1:
                 mtime = os.path.getmtime(full_path)
                 mtime_dt = datetime.datetime.fromtimestamp(mtime)
-                spreadsheet_date = parse_date_value(ultima_atualizacao)
+                spreadsheet_date = parse_date_value(ultima_atualizacao,
+                                                    day_first=day_first)
+                ambiguity = ""
+                if date_is_ambiguous(ultima_atualizacao):
+                    # Disclosed rather than resolved in silence: the reading
+                    # chosen here is what decides which source the
+                    # recommendation points at, and the other reading can point
+                    # at the other source.
+                    ambiguity = (
+                        " (note: '%s' is ambiguous — read as %s under this "
+                        "base's %s-first convention; the other reading is a "
+                        "different date, so confirm before relying on this)"
+                        % (ultima_atualizacao, format_date(spreadsheet_date),
+                           "day" if day_first else "month"))
 
                 if ultima_atualizacao is not None and spreadsheet_date is None:
                     recommendation = (
@@ -1770,6 +2018,7 @@ def check(base_dir, master_list_name=None):
                 else:
                     recommendation = "no automatic recommendation — manual decision needed"
 
+                recommendation += ambiguity
                 detail = [f"[{sheet_name}] {codigo}: names diverge between sources:"]
                 for origin, value in candidates.items():
                     detail.append(f"    - {origin}: '{value}'")
@@ -1824,12 +2073,18 @@ def check(base_dir, master_list_name=None):
             if path not in referenced_files:
                 orphan_file_issues.append(f"'{path}' exists in the base, but isn't in any master-index row")
 
-    if sheets_without_header:
-        print(
-            "WARNING: the following sheet(s) have no recognizable column-header row "
-            "(a 'Code'/'Código' column) and were skipped entirely — nothing on them was "
-            f"checked: {', '.join(sheets_without_header)}\n"
-        )
+    # A skipped sheet is a finding, not a footnote. It used to print only a
+    # WARNING and contribute nothing to the count, so a base whose sheet had
+    # lost its header row reported "SUMMARY: 0 problem(s) found" and exited 0 —
+    # the documented "clean" signal for a CI gate — while an entire sheet went
+    # unchecked. Whether the exit code happened to be non-zero depended on
+    # orphan detection incidentally firing for the same documents.
+    skipped_sheet_issues = [
+        "sheet '%s' has no recognizable column-header row (a 'Code'/'Código' "
+        "column), so it was skipped entirely and nothing it indexes was "
+        "checked. This run cannot vouch for those documents." % name
+        for name in sheets_without_header
+    ]
 
     def section(title, items):
         print(f"=== {title} ({len(items)}) ===")
@@ -1840,6 +2095,8 @@ def check(base_dir, master_list_name=None):
             print("- " + item)
         print()
 
+    section("Sheets skipped entirely (no recognizable column-header row)",
+            skipped_sheet_issues)
     section("Broken references (master-index spreadsheet → file)", broken_reference_issues)
     section("Orphaned files (file → master-index spreadsheet)", orphan_file_issues)
     section("Duplicate/shared codes", duplicate_code_issues)
@@ -1851,6 +2108,7 @@ def check(base_dir, master_list_name=None):
     section("Unreadable documents (the file exists but cannot be parsed)",
             unreadable_document_issues)
     section("Invalid Status value (Section 7)", invalid_status_issues)
+    section("Row with an empty Code cell (Section 2)", missing_code_issues)
     section("Version History sequence (Section 3)", version_sequence_issues)
     if len(footer_labels) > 1:
         detail = ["the base uses more than one footer label; every document must carry the same one:"]
@@ -1906,6 +2164,8 @@ def check(base_dir, master_list_name=None):
         + len(header_missing_version_issues)
         + len(unreadable_document_issues)
         + len(invalid_status_issues)
+        + len(missing_code_issues)
+        + len(skipped_sheet_issues)
         + len(version_sequence_issues)
         + len(formatting_issues)
         + len(structure_issues)

@@ -6,7 +6,7 @@
   },
   "metadata": {
     "description": "Documentation standard for IT knowledge bases, with a read-only audit script and test suite.",
-    "version": "0.9.0"
+    "version": "0.9.1"
   },
   "plugins": [
     {

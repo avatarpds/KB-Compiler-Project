@@ -23,6 +23,7 @@ Usage:
 Exit code: 0 if every expectation holds, 1 otherwise.
 """
 
+import json
 import os
 import re
 import shutil
@@ -62,9 +63,21 @@ EXPECTED = {
     "Version History sequence": 2,
     # KB-030 (4 margins + size + color), KB-031 (shading + color), KB-040
     # (landscape + no footer), KB-041 (en dash), KB-042 (2 non-list sections),
-    # KB-043 (all-caps author), KB-060 (two sections on one numbering
-    # sequence), plus one base-level footer-label mismatch.
-    "Formatting violations": 16,
+    # KB-043 (all-caps author), KB-060 (two sections on one DECIMAL numbering
+    # sequence), KB-063 (typed page number in a footer containing the word
+    # PAGE), KB-064 (a "List Number" step whose direct numbering is a bullet
+    # definition, so it renders as a bullet), plus one base-level footer-label
+    # mismatch.
+    # KB-061 must NOT appear here: it shares a BULLET definition, which has no
+    # count for a second section to continue. KB-062 must not either: its NFD
+    # title is the same text as the index's NFC name.
+    "Formatting violations": 18,
+    # Both of these are clean in the fixture; they have dedicated groups below.
+    # Declared here so the report is asserted to still CARRY the sections — a
+    # detection that silently stops being printed is the failure mode this
+    # whole suite exists to catch.
+    "Sheets skipped entirely": 0,
+    "Row with an empty Code cell": 0,
     "Structure violations": 2,       # KB-036: missing Prerequisites + history not last
     "Folder/tab mismatch": 2,        # KB-035 (planted) + KB-009's duplicate row
     # KB-045 is resolved by its tab; KB-047's two copies are not.
@@ -703,6 +716,326 @@ def test_language_is_detected(tmp):
     return failures
 
 
+# ---------------------------------------------------------------------------
+# Regressions fixed in 0.9.1
+# ---------------------------------------------------------------------------
+def _sole_index(base):
+    """The one .xlsx in a base — whatever the bootstrap decided to call it."""
+    names = [f for f in os.listdir(base) if f.lower().endswith(".xlsx")]
+    if len(names) != 1:
+        raise AssertionError("expected exactly one index in %s, found %s"
+                             % (base, names))
+    return os.path.join(base, names[0])
+
+
+def _mini_base(tmp, name, doc_name="KB-001 - One.docx"):
+    """A one-document base with a bootstrapped index, ready to be broken."""
+    base = os.path.join(tmp, name)
+    os.makedirs(os.path.join(base, "01 - Identity"))
+    shutil.copy(_fixture_doc(tmp), os.path.join(base, "01 - Identity", doc_name))
+    proc = run([BOOTSTRAP, base])
+    if proc.returncode != 0:
+        raise AssertionError("bootstrap failed (rc=%d)" % proc.returncode)
+    return base
+
+
+def test_skipped_sheet_is_counted(tmp):
+    """
+    A sheet the checker cannot read is a finding, not a footnote.
+
+    It used to print only a WARNING and contribute nothing to the count, so a
+    base whose sheet had lost its recognizable header row reported
+    "SUMMARY: 0 problem(s) found" and exited 0 — the documented "clean" signal
+    a CI gate keys on — while an entire sheet went unchecked. Whether the exit
+    code happened to be non-zero depended on orphan detection incidentally
+    firing for the same documents.
+    """
+    base = _mini_base(tmp, "skippedsheet")
+    path = _sole_index(base)
+    wb = openpyxl.load_workbook(path)
+    ws = wb.create_sheet("SAP")
+    ws.append(["Cod.", "Doc", "Arq."])       # none of these are column synonyms
+    ws.append(["KB-900", "Planned", "KB-900 - Planned.docx"])
+    wb.save(path)
+
+    proc = run([CHECKER, base])
+    failures = []
+    count = match_section(parse_sections(proc.stdout), "Sheets skipped entirely")
+    if count != 1:
+        failures.append("expected 1 skipped-sheet finding, got %s" % count)
+    if proc.returncode == 0:
+        failures.append("a run that skipped a whole sheet must not exit 0")
+    return failures
+
+
+def test_empty_code_row_is_reported_once(tmp):
+    """
+    A row with real content but an empty Code used to be dropped in silence:
+    nothing reported the row, and the document it indexes then resurfaced as an
+    "orphan" — sending the reader after the file instead of the row that is
+    actually wrong. Section 2's "—" marker exists precisely so a document
+    without a code is still visible in the index.
+
+    Asserts BOTH halves: the row is reported, and it is reported once.
+    """
+    base = _mini_base(tmp, "emptycode")
+    path = _sole_index(base)
+    wb = openpyxl.load_workbook(path)
+    blanked = False
+    for sheet in wb.sheetnames:
+        for row in wb[sheet].iter_rows():
+            for cell in row:
+                if str(cell.value).strip() == "KB-001":
+                    cell.value = None
+                    blanked = True
+    if not blanked:
+        return ["could not find the KB-001 cell to blank"]
+    wb.save(path)
+
+    found = parse_sections(run([CHECKER, base]).stdout)
+    failures = []
+    if match_section(found, "Row with an empty Code cell") != 1:
+        failures.append("expected 1 empty-Code finding, got %s"
+                        % match_section(found, "Row with an empty Code cell"))
+    if match_section(found, "Orphaned files") != 0:
+        failures.append(
+            "the row still references the file, so it must not ALSO be an "
+            "orphan (got %s)" % match_section(found, "Orphaned files"))
+    return failures
+
+
+def test_office_lock_files_are_not_orphans(tmp):
+    """
+    Auditing a base while one document is open in Word reported that document's
+    "~$" lock file as an orphan — a finding that disappears on its own, which
+    is the fastest way to make a report look unreliable. Same for the junk
+    Windows and macOS leave in a synced folder.
+    """
+    base = _mini_base(tmp, "lockfiles")
+    folder = os.path.join(base, "01 - Identity")
+    for name in ("~$B-001 - One.docx", "Thumbs.db", ".~lock.KB-001 - One.docx#"):
+        with open(os.path.join(folder, name), "wb") as f:
+            f.write(b"\x00")
+    with open(os.path.join(base, ".DS_Store"), "wb") as f:
+        f.write(b"\x00")
+
+    count = match_section(parse_sections(run([CHECKER, base]).stdout),
+                          "Orphaned files")
+    if count:
+        return ["lock files / OS junk produced %s false orphan(s)" % count]
+    return []
+
+
+def test_master_index_lookalike_docx_is_still_checked(tmp):
+    """
+    is_master_list_filename matched on the name prefix alone, with no extension
+    check — so a DOCUMENT called "Master List Guidelines.docx" was treated as
+    the index itself and silently excluded from orphan detection. An unindexed
+    document that never appears in the report at all is the worst shape a miss
+    can take.
+    """
+    base = _mini_base(tmp, "lookalike")
+    # Copied AFTER the bootstrap, so nothing indexes it: a genuine orphan.
+    shutil.copy(_fixture_doc(tmp),
+                os.path.join(base, "01 - Identity", "Master List Guidelines.docx"))
+
+    out = run([CHECKER, base]).stdout
+    if "Master List Guidelines.docx" not in out:
+        return ["an unindexed .docx named like the index was never reported"]
+    return []
+
+
+def test_bullets_sharing_a_definition_are_clean(tmp):
+    """
+    Word reuses one numbering definition for identical bullet formatting, so two
+    bulleted sections sharing one is normal — and there is no number on screen
+    for the second section to get wrong. Reporting it as a shared numbering
+    sequence accounted for 9 of 19 findings from that check on a real base,
+    every one of them false.
+
+    The ordered case must keep firing: that is the defect the check is for.
+    """
+    out = run([CHECKER, os.path.join(tmp, "detections")]).stdout
+    shared = [l for l in out.splitlines() if "share one numbering sequence" in l]
+    failures = []
+    if not any("KB-060" in l for l in shared):
+        failures.append(
+            "KB-060 shares a DECIMAL definition and must still be reported")
+    if any("KB-061" in l for l in shared):
+        failures.append(
+            "KB-061 shares a BULLET definition — bullets have no count to "
+            "continue, so this is a false positive")
+    return failures
+
+
+def test_languages_json_requires_its_keys(tmp):
+    """
+    Adding a language is documented as a data edit to languages.json, so a
+    half-finished entry is an expected mistake. The module-level tables index
+    some keys directly, and a missing one raised a bare KeyError at IMPORT
+    time — before main() exists to catch it — which exits 1. That is this
+    tool's own "problems found" code, so a broken vocabulary was
+    indistinguishable from a completed audit to anything reading the exit
+    status.
+    """
+    sandbox = os.path.join(tmp, "langsandbox")
+    shutil.copytree(os.path.abspath(SCRIPTS), sandbox)
+    langs_file = os.path.join(sandbox, "languages.json")
+    with open(langs_file, encoding="utf-8") as f:
+        data = json.load(f)
+    data["languages"]["fr"] = {"spreadsheet_name": "Liste Maitresse"}
+    with open(langs_file, "w", encoding="utf-8") as f:
+        json.dump(data, f, ensure_ascii=False)
+
+    proc = run([os.path.join(sandbox, "check_master_list.py"),
+                os.path.join(tmp, "detections")])
+    out = proc.stdout + proc.stderr
+    failures = []
+    if proc.returncode != 2:
+        failures.append("a half-finished language must exit 2 ('couldn't run'), "
+                        "got %d" % proc.returncode)
+    if "Traceback" in out:
+        failures.append("raised a traceback instead of reporting the problem")
+    if "overview_sheet" not in out:
+        failures.append("the error message should name the missing key")
+    return failures
+
+
+def test_typed_page_number_is_reported(tmp):
+    """
+    The footer check credited any footer whose XML contained the substring
+    "PAGE" with having a Word automatic page field. A footer reading
+    "ACME HOMEPAGE | Knowledge Base" satisfied that while its page number was
+    plain typed text, so the violation went unreported.
+
+    Needs its own assertion: against the old checker this miss (-1) and the
+    bullet false positive (+1) cancel out, leaving the Formatting violations
+    COUNT correct for the wrong reasons.
+    """
+    out = run([CHECKER, os.path.join(tmp, "detections")]).stdout
+    typed = [l for l in out.splitlines()
+             if "page field" in l and "KB-063" in l]
+    if not typed:
+        return ["KB-063's typed page number was not reported; the word PAGE in "
+                "the footer text must not pass for a page field"]
+    return []
+
+
+def test_direct_numbering_beats_the_style_name(tmp):
+    """
+    Word applies a paragraph's own w:numPr over whatever its style says, so a
+    paragraph styled "List Number" whose direct numbering points at a bullet
+    definition renders as a bullet. Consulting the style NAME first called it
+    decimal and reported nothing — and that is how this suite's own
+    shared-numbering fixture got away with pinning "numbered" steps to a bullet
+    definition for two releases.
+
+    Asserted by name, not only by count: a count can be right for the wrong
+    reasons, as this release already demonstrated twice.
+    """
+    out = run([CHECKER, os.path.join(tmp, "detections")]).stdout
+    hits = [l for l in out.splitlines()
+            if "KB-064" in l and "not formatted as" in l]
+    if not hits:
+        return ["KB-064's Step by Step renders as bullets and must be reported "
+                "as not a numbered list, whatever its style is named"]
+    return []
+
+
+def test_ambiguous_dates_are_settled_and_disclosed(tmp):
+    """
+    parse_date_value tried %d/%m/%Y unconditionally, so an English base's
+    "03/04/2026" was read as 3 April. The order now follows the base's recorded
+    language, and date_is_ambiguous marks the cases where the choice actually
+    changes the date — those feed the name-divergence recommendation, which is
+    the only thing that consumes this.
+    """
+    code = (
+        "import sys; sys.path.insert(0, %r)\n"
+        "import check_master_list as c\n"
+        "print(c.parse_date_value('03/04/2026', day_first=True))\n"
+        "print(c.parse_date_value('03/04/2026', day_first=False))\n"
+        "print(c.date_is_ambiguous('03/04/2026'))\n"
+        "print(c.date_is_ambiguous('13/04/2026'))\n"
+        "print(c.date_is_ambiguous('05/05/2026'))\n"
+        "import datetime\n"
+        "print(c.date_is_ambiguous(datetime.date(2026, 4, 3)))\n"
+    ) % os.path.abspath(SCRIPTS)
+
+    proc = run(["-c", code])
+    got = proc.stdout.split()
+    want = ["2026-04-03",   # day-first: 3 April
+            "2026-03-04",   # month-first: 4 March
+            "True",         # both readings valid and different
+            "False",        # 13 can only be a day
+            "False",        # both readings agree
+            "False"]        # a real date carries no ambiguity
+    if got != want:
+        return ["expected %s, got %s%s" % (want, got,
+                ("  stderr: " + proc.stderr.strip()[:200]) if proc.stderr.strip() else "")]
+    return []
+
+
+def test_numbered_headings_are_recognized(tmp):
+    """
+    Section matching is startswith() against the bare vocabulary term, so a
+    heading reading "2. Prerequisites" was invisible to it: the structure check
+    reported the section missing, and the per-section list rule skipped it
+    entirely, leaving a numbered document's Step by Step never verified to be a
+    numbered list.
+
+    KB-065 is conforming in every respect and must produce no finding at all.
+    """
+    out = run([CHECKER, os.path.join(tmp, "detections")]).stdout
+    hits = [l for l in out.splitlines() if "KB-065" in l]
+    if hits:
+        return ["KB-065 numbers its headings and is otherwise conforming, but "
+                "produced: " + "; ".join(h.strip()[:90] for h in hits[:3])]
+    return []
+
+
+def test_legacy_on_topical_tab_is_not_a_mismatch(tmp):
+    """
+    Section 7 gives legacy documents two homes in the index: their own Legacy
+    tab, or their original topical tab with Status = Legacy. The folder/tab
+    check only tolerated the first, so the second was reported as a mismatch
+    telling the reader to "move the file or move the row" — undoing an
+    arrangement the standard had offered them.
+
+    KB-066 is that arrangement: Status Legacy, file in Legacy/, row on the
+    Infrastructure tab.
+    """
+    out = run([CHECKER, os.path.join(tmp, "detections")]).stdout
+    hits = [l for l in out.splitlines()
+            if "KB-066" in l and "is filed under category" in l]
+    if hits:
+        return ["a Legacy-status row on its topical tab is permitted by "
+                "Section 7, but was reported: " + hits[0].strip()[:110]]
+    return []
+
+
+def test_dash_inside_the_name_is_allowed(tmp):
+    """
+    Section 4 constrains the separator BETWEEN THE CODE AND THE NAME: "Use a
+    regular hyphen -, never an en/em dash, between the code and the name." The
+    check scanned the whole header, so a document whose own title contains an em
+    dash was reported as using the wrong separator -- which reads as an
+    instruction to strip punctuation out of the title.
+
+    KB-067 has a correct hyphen after the code and an em dash inside its name.
+    KB-041 remains the real violation, with the dash AS the separator.
+    """
+    out = run([CHECKER, os.path.join(tmp, "detections")]).stdout
+    failures = []
+    if [l for l in out.splitlines() if "KB-067" in l and "plain hyphen" in l]:
+        failures.append("an em dash inside the document's own name was reported "
+                        "as a wrong code/name separator")
+    if not [l for l in out.splitlines() if "KB-041" in l and "plain hyphen" in l]:
+        failures.append("KB-041 uses an en dash AS the separator and must still "
+                        "be reported")
+    return failures
+
+
 TESTS = [
     ("detections", test_detections),
     ("bootstrap", test_bootstrap),
@@ -720,6 +1053,18 @@ TESTS = [
     ("Overview extra column", test_overview_extra_column),
     ("--force never indexes the index", test_force_does_not_index_the_index),
     ("language detected from the base", test_language_is_detected),
+    ("skipped sheet is counted", test_skipped_sheet_is_counted),
+    ("empty Code row reported once", test_empty_code_row_is_reported_once),
+    ("Office lock files are not orphans", test_office_lock_files_are_not_orphans),
+    ("index look-alike .docx still checked", test_master_index_lookalike_docx_is_still_checked),
+    ("shared bullets are clean", test_bullets_sharing_a_definition_are_clean),
+    ("typed page number reported", test_typed_page_number_is_reported),
+    ("direct numbering beats style name", test_direct_numbering_beats_the_style_name),
+    ("numbered headings recognized", test_numbered_headings_are_recognized),
+    ("legacy on topical tab is fine", test_legacy_on_topical_tab_is_not_a_mismatch),
+    ("dash inside the name is allowed", test_dash_inside_the_name_is_allowed),
+    ("ambiguous dates settled and disclosed", test_ambiguous_dates_are_settled_and_disclosed),
+    ("languages.json keys validated", test_languages_json_requires_its_keys),
 ]
 
 

@@ -1,0 +1,15 @@
+# Environment
+
+date (UTC):      2026-09-15 15:34:33
+platform:        Windows 11 (AMD64)
+python:          3.14.7
+python-docx:     1.2.0
+openpyxl:        3.1.5
+locale encoding: cp1252
+PYTHONIOENCODING: utf-8:surrogateescape
+
+Python 3.14 is what this machine has installed. The CI matrix covers
+3.9 and 3.13 only, so 3.14 is exercised HERE and nowhere else, and
+3.9 is unverified by this run.
+
+The pinned dependencies install and run clean on 3.14.

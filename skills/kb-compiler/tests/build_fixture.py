@@ -87,6 +87,45 @@ def add_callout(d, text="⚠ Aviso", shading="FFF3CD", color=CALLOUT_TEXT_COLOR)
     return p
 
 
+def numid_with_format(d, wanted):
+    """
+    The numId in this document whose level-0 numFmt is `wanted`
+    ("decimal" / "bullet").
+
+    Picking numbering.findall(w:num)[0] instead is what made the shared-
+    numbering case unfaithful: the first definition in the part is whichever
+    list style the document used first, so a document that opened with a
+    bulleted prerequisite pinned its "numbered" steps to a BULLET definition.
+    The paragraphs then rendered as bullets and modeled nothing.
+    """
+    numbering = d.part.numbering_part.element
+    for num in numbering.findall(qn("w:num")):
+        el = num.find(qn("w:abstractNumId"))
+        if el is None:
+            continue
+        abstract_id = el.get(qn("w:val"))
+        for a in numbering.findall(qn("w:abstractNum")):
+            if a.get(qn("w:abstractNumId")) != abstract_id:
+                continue
+            lvl = a.find(qn("w:lvl"))
+            fmt = lvl.find(qn("w:numFmt")) if lvl is not None else None
+            if fmt is not None and (fmt.get(qn("w:val")) or "").lower() == wanted:
+                return num.get(qn("w:numId"))
+    raise AssertionError(
+        "the fixture needs a '%s' numbering definition in this document, and "
+        "none exists yet — add a paragraph in that list style first." % wanted)
+
+
+def pin_to_numid(paragraph, num_id, ilvl="0"):
+    """Direct numbering on the paragraph, which is what Word writes."""
+    pPr = paragraph._p.get_or_add_pPr()
+    numPr = OxmlElement("w:numPr")
+    lvl = OxmlElement("w:ilvl"); lvl.set(qn("w:val"), ilvl)
+    num = OxmlElement("w:numId"); num.set(qn("w:val"), num_id)
+    numPr.append(lvl); numPr.append(num)
+    pPr.append(numPr)
+
+
 def add_body_sections(d, lists=True):
     """Emits the required Section 3 headings that come before the history."""
     d.add_heading("Purpose", 1)
@@ -204,6 +243,32 @@ def build(out):
     add_body_sections(d)
     add_history(d, hist)
     d.save(os.path.join(legacy_dir, "Superseded Process.docx"))
+
+    # --- a superseded document that sits in the Legacy FOLDER while its row
+    # stays on its original topical tab. Section 7 offers exactly this as one of
+    # two arrangements ("they can stay listed in their original topical category
+    # tab (with Status = 'Legacy') or get their own 'Legacy' tab"), so it must
+    # not be reported as a folder/tab mismatch. It was — and a report that tells
+    # you to undo what the standard offered you is worse than silence.
+    d = new_doc()
+    d.sections[0].header.paragraphs[0].text = "KB-066 - Processo Aposentado\tv1.0"
+    add_title(d, "KB-066 - Processo Aposentado")
+    add_body_sections(d)
+    add_history(d, hist)
+    d.save(os.path.join(legacy_dir, "KB-066 - Processo Aposentado.docx"))
+
+    # --- an em dash inside the document's own NAME, with a correct plain-hyphen
+    # separator after the code. Must stay clean: Section 4 constrains the
+    # separator between the code and the name, not the punctuation an author
+    # chooses inside their title. Scanning the whole header reported this, which
+    # reads as "remove the dash from your own title".
+    d = new_doc()
+    d.sections[0].header.paragraphs[0].text = (
+        "KB-067 - Expira\u00e7\u00e3o \u2014 Contingent Worker\tv1.0")
+    add_title(d, "KB-067 - Expira\u00e7\u00e3o \u2014 Contingent Worker")
+    add_body_sections(d)
+    add_history(d, hist)
+    d.save(os.path.join(infra, "KB-067 - Expira\u00e7\u00e3o \u2014 Contingent Worker.docx"))
 
     # --- FORMATTING: wrong margin, wrong title size, wrong title color ---
     d = new_doc(margin_inches=1.0)
@@ -484,19 +549,105 @@ def build(out):
     first = d.add_paragraph("Do the first thing", style="List Number")
     d.add_heading("Step by Step - Alternate", 1)
     second = d.add_paragraph("Do the other thing", style="List Number")
-    # Pin both to the same explicit numId, which is what a real document ends up
-    # with after someone copies a block between sections.
-    numbering = d.part.numbering_part.element
-    shared_id = numbering.findall(qn("w:num"))[0].get(qn("w:numId"))
+    # Pin both to the same explicit DECIMAL numId, which is what a real document
+    # ends up with after someone copies a block between sections. It has to be
+    # the decimal definition specifically: only an ordered list has a count for
+    # the second section to carry on from.
+    shared_id = numid_with_format(d, "decimal")
     for para in (first, second):
-        pPr = para._p.get_or_add_pPr()
-        numPr = OxmlElement("w:numPr")
-        ilvl = OxmlElement("w:ilvl"); ilvl.set(qn("w:val"), "0")
-        num = OxmlElement("w:numId"); num.set(qn("w:val"), shared_id)
-        numPr.append(ilvl); numPr.append(num)
-        pPr.append(numPr)
+        pin_to_numid(para, shared_id)
     add_history(d, hist)
     d.save(os.path.join(infra, "KB-060 - Numeracao Compartilhada.docx"))
+
+    # --- two BULLETED sections sharing one bullet definition. Must stay clean.
+    # Word reuses a single definition for identical bullet formatting, so this
+    # is what a normal document looks like — and there is no number on screen
+    # for the second section to get wrong. Reported as a shared numbering
+    # sequence, it was 9 of 19 findings from that check on a real base, every
+    # one of them false.
+    d = new_doc()
+    d.sections[0].header.paragraphs[0].text = "KB-061 - Marcadores Compartilhados\tv1.0"
+    add_title(d, "KB-061 - Marcadores Compartilhados")
+    d.add_heading("Purpose", 1)
+    d.add_heading("Prerequisites", 1)
+    pre = d.add_paragraph("A prerequisite", style="List Bullet")
+    d.add_heading("Step by Step", 1)
+    d.add_paragraph("Do the thing", style="List Number")
+    d.add_heading("Verification", 1)
+    ver = d.add_paragraph("It worked", style="List Bullet")
+    bullet_id = numid_with_format(d, "bullet")
+    for para in (pre, ver):
+        pin_to_numid(para, bullet_id)
+    add_history(d, hist)
+    d.save(os.path.join(infra, "KB-061 - Marcadores Compartilhados.docx"))
+
+    # --- accented name written NFD in the document, NFC in the index. Must
+    # stay clean: these are the same text in two Unicode forms. The file-name
+    # side was already normalized before comparing; the title, header and
+    # spreadsheet sides were not, so this was reported as a name divergence
+    # between two identical-looking strings, recommending you "fix" one.
+    nfd_name = unicodedata.normalize("NFD", "Instala\u00e7\u00e3o Remota")
+    d = new_doc()
+    d.sections[0].header.paragraphs[0].text = "KB-062 - %s\tv1.0" % nfd_name
+    add_title(d, "KB-062 - %s" % nfd_name)
+    add_body_sections(d)
+    add_history(d, hist)
+    d.save(os.path.join(
+        infra,
+        unicodedata.normalize("NFC", "KB-062 - Instala\u00e7\u00e3o Remota.docx")))
+
+    # --- footer whose page number is TYPED, in a footer whose text contains
+    # the word PAGE. Checking the footer XML for the substring "PAGE" credited
+    # this document with an automatic page field it does not have, so the typed
+    # number went unreported. One formatting violation.
+    d = new_doc(footer=False)
+    d.sections[0].footer.paragraphs[0].text = (
+        "ACME HOMEPAGE  |  Knowledge Base\tPage 1 of 1")
+    d.sections[0].header.paragraphs[0].text = "KB-063 - Rodape Digitado\tv1.0"
+    add_title(d, "KB-063 - Rodape Digitado")
+    add_body_sections(d)
+    add_history(d, hist)
+    d.save(os.path.join(infra, "KB-063 - Rodape Digitado.docx"))
+
+    # --- a Step by Step whose items are STYLED "List Number" but carry direct
+    # numbering pointing at the BULLET definition. Word applies the direct
+    # numbering, so these render as bullets and the section is not a numbered
+    # list — whatever its style is called. Reading the style name first called
+    # it decimal and reported nothing, which is also how this fixture's own
+    # shared-numbering case got away with pinning "numbered" steps to a bullet
+    # definition for two releases. One formatting violation.
+    d = new_doc()
+    d.sections[0].header.paragraphs[0].text = "KB-064 - Passos Com Marcador\tv1.0"
+    add_title(d, "KB-064 - Passos Com Marcador")
+    d.add_heading("Purpose", 1)
+    d.add_heading("Prerequisites", 1)
+    d.add_paragraph("A prerequisite", style="List Bullet")
+    d.add_heading("Step by Step", 1)
+    step = d.add_paragraph("Do the thing", style="List Number")
+    pin_to_numid(step, numid_with_format(d, "bullet"))
+    add_history(d, hist)
+    d.save(os.path.join(infra, "KB-064 - Passos Com Marcador.docx"))
+
+    # --- sections NUMBERED in their headings. Conforming in every respect: the
+    # standard mandates an order, not the absence of an enumerator, and real
+    # bases number their sections. Matching is startswith() against the bare
+    # term, so "2. Prerequisites" used to be reported as a missing section —
+    # and worse, its list formatting was never checked at all, because the
+    # per-section list rule looked up the same unstripped text.
+    d = new_doc()
+    d.sections[0].header.paragraphs[0].text = "KB-065 - Secoes Numeradas\tv1.0"
+    add_title(d, "KB-065 - Secoes Numeradas")
+    d.add_heading("1. Purpose", 1)
+    d.add_paragraph("Why this exists.")
+    d.add_heading("2. Prerequisites", 1)
+    d.add_paragraph("A prerequisite", style="List Bullet")
+    d.add_heading("3. Step by Step", 1)
+    d.add_paragraph("Do the thing", style="List Number")
+    add_history(d, hist, heading=False)
+    # The heading has to be numbered too, and still be recognized as last.
+    hist_heading = d.add_heading("4. Version History", 1)
+    d.paragraphs[-1]._p.addprevious(hist_heading._p)
+    d.save(os.path.join(infra, "KB-065 - Secoes Numeradas.docx"))
 
     # --- multilingual recognition: a fully conforming document whose section
     # headings and history columns are in another language (Portuguese here).
@@ -576,6 +727,16 @@ def build(out):
             ("KB-058", "Historico Com Linhas Vazias", "KB-058 - Historico Com Linhas Vazias.docx", "Active", "1.1", BASE_DATE, BASE_DATE, "Lucas Souza"),
             ("KB-059", "Prereq Numerado", "KB-059 - Prereq Numerado.docx", "Active", "1.0", BASE_DATE, BASE_DATE, "Lucas Souza"),
             ("KB-060", "Numeracao Compartilhada", "KB-060 - Numeracao Compartilhada.docx", "Active", "1.0", BASE_DATE, BASE_DATE, "Lucas Souza"),
+            ("KB-061", "Marcadores Compartilhados", "KB-061 - Marcadores Compartilhados.docx", "Active", "1.0", BASE_DATE, BASE_DATE, "Lucas Souza"),
+            # NFC on this side, NFD inside the document: must NOT diverge.
+            ("KB-062", unicodedata.normalize("NFC", "Instala\u00e7\u00e3o Remota"), unicodedata.normalize("NFC", "KB-062 - Instala\u00e7\u00e3o Remota.docx"), "Active", "1.0", BASE_DATE, BASE_DATE, "Lucas Souza"),
+            ("KB-063", "Rodape Digitado", "KB-063 - Rodape Digitado.docx", "Active", "1.0", BASE_DATE, BASE_DATE, "Lucas Souza"),
+            ("KB-064", "Passos Com Marcador", "KB-064 - Passos Com Marcador.docx", "Active", "1.0", BASE_DATE, BASE_DATE, "Lucas Souza"),
+            ("KB-065", "Secoes Numeradas", "KB-065 - Secoes Numeradas.docx", "Active", "1.0", BASE_DATE, BASE_DATE, "Lucas Souza"),
+            # Status Legacy, file in Legacy/, row deliberately left on this
+            # topical tab — the second arrangement Section 7 permits.
+            ("KB-066", "Processo Aposentado", "Legacy/KB-066 - Processo Aposentado.docx", "Legacy", "1.0", BASE_DATE, BASE_DATE, "Lucas Souza"),
+            ("KB-067", "Expira\u00e7\u00e3o \u2014 Contingent Worker", "KB-067 - Expira\u00e7\u00e3o \u2014 Contingent Worker.docx", "Active", "1.0", BASE_DATE, BASE_DATE, "Lucas Souza"),
             # duplicate code: KB-009 already used in the other sheet
             ("KB-009", "Codigo Duplicado", "KB-009 - Configurar MFA.docx", "Active", "1.0", BASE_DATE, BASE_DATE, "Lucas Souza"),
         ],
