@@ -2,6 +2,40 @@
 
 All notable changes to this project are documented here.
 
+## 0.9.2
+
+Documentation only. No code changed, so the audit behaves exactly as it did in
+0.9.1.
+
+While remediating a real base, rows added to a Version History table came out
+looking wrong — larger, and a different colour than every row above them.
+Nothing was broken; the table simply stopped matching itself, which is obvious
+to anyone who opens the document and invisible to the audit. The cause was
+mundane: in these documents font, size and colour sit on the runs rather than on
+the table style, so a row written without them inherits Word's defaults instead
+of the document's look.
+
+0.9.1 added a rule about that for Version History rows. This release
+generalises it, because the problem was never about one table:
+
+- **Section 4** now says out loud what it had only implied. The properties it
+  lists belong to the standard and don't move. Everything it doesn't list —
+  table fonts and borders, body text size, spacing, column widths — belongs to
+  the document, and an edit reads it off the document and matches it. Section 4
+  already worked this way for one property: whether Prerequisites uses bullets
+  or numbers "follows whatever the document already uses". This is that idea,
+  applied consistently.
+
+- **Where a document's house style conflicts with Section 4, ask** rather than
+  normalising in silence — and only where there's a genuine conflict, never on
+  an edit the standard says nothing about.
+
+No new check came with it. The audit enforces six constants and never had an
+opinion about a history table's font, so matching the document can't produce a
+finding. Checking it would have meant judging a Word style cascade that most
+documents leave unstated, which is the false-positive territory the conservative
+mode exists to avoid. Not writing the problem beats detecting it.
+
 ## 0.9.1
 
 Found by auditing a real 60-document base (63 indexed rows across six category

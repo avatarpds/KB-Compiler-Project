@@ -1,0 +1,12 @@
+# Environment
+
+date (UTC):      2026-09-15 17:17:26
+platform:        Windows 11 (AMD64)
+python:          3.14.7
+python-docx:     1.2.0 (pinned)
+openpyxl:        3.1.5
+locale encoding: cp1252
+PYTHONIOENCODING: None
+
+0.9.2 changed no Python. This run only confirms the suite is still green
+on the released tree; the CI matrix (3.9 and 3.13) covers the rest.
