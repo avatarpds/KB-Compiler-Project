@@ -1,0 +1,372 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="description" content="One documentation standard for every KB article your team writes, and one read-only command that checks the whole knowledge base against it.">
+<meta name="color-scheme" content="light dark">
+<meta name="theme-color" content="#1F3864" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#0F131C" media="(prefers-color-scheme: dark)">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ctext y='.9em' font-size='90'%3E%F0%9F%93%90%3C/text%3E%3C/svg%3E">
+
+<meta property="og:type" content="website">
+<meta property="og:title" content="KB-Compiler">
+<meta property="og:description" content="One documentation standard for every KB article your team writes, and one read-only command that checks the whole knowledge base against it.">
+<meta name="twitter:card" content="summary">
+
+  <style>
+    /* Baseline the artifact host normally supplies. Pages supplies nothing. */
+    :root { color-scheme: light dark; }
+    html { -webkit-text-size-adjust: 100%; }
+    body { margin: 0; }
+    img { max-width: 100%; }
+    [hidden] { display: none !important; }
+  </style>
+<title>KB-Compiler</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@500;600;700;800&family=Source+Serif+4:opsz,wght@8..60,400;8..60,600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+  /* Palette = the standard's OWN mandated document colours. #1F3864 is the
+     title colour it requires in every KB; #FFF3CD / #7B5C00 its required
+     warning callout. Neutrals carry a blue bias toward that accent. */
+  :root {
+    --paper:     #F7F8FA;
+    --card:      #FFFFFF;
+    --ink:       #171C28;
+    --ink-soft:  #4B5568;
+    --ink-faint: #7C8799;
+    --rule:      #DCE1E9;
+    --rule-soft: #EAEEF3;
+    --navy:      #1F3864;
+    --navy-lift: #2E5093;
+    --amber-bg:  #FFF3CD;
+    --amber-ink: #7B5C00;
+    --ok:        #1E6F50;
+    --term-bg:   #141A26;
+    --term-ink:  #C9D3E4;
+    --term-dim:  #6E7C94;
+    --shadow:    0 1px 2px rgba(23,28,40,.05), 0 18px 40px -16px rgba(31,56,100,.20);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --paper: #0F131C; --card: #171D29; --ink: #E8ECF4; --ink-soft: #A8B2C4;
+      --ink-faint: #78849B; --rule: #2B3342; --rule-soft: #212936;
+      --navy: #93B3E6; --navy-lift: #AEC7F0; --amber-bg: #3A2F0E; --amber-ink: #F2D98A;
+      --ok: #62C098; --term-bg: #090D14; --term-ink: #C9D3E4; --term-dim: #66738A;
+      --shadow: 0 1px 2px rgba(0,0,0,.4), 0 18px 44px -18px rgba(0,0,0,.65);
+    }
+  }
+  :root[data-theme="dark"] {
+    --paper: #0F131C; --card: #171D29; --ink: #E8ECF4; --ink-soft: #A8B2C4;
+    --ink-faint: #78849B; --rule: #2B3342; --rule-soft: #212936;
+    --navy: #93B3E6; --navy-lift: #AEC7F0; --amber-bg: #3A2F0E; --amber-ink: #F2D98A;
+    --ok: #62C098; --term-bg: #090D14; --term-ink: #C9D3E4; --term-dim: #66738A;
+    --shadow: 0 1px 2px rgba(0,0,0,.4), 0 18px 44px -18px rgba(0,0,0,.65);
+  }
+
+  * { box-sizing: border-box; }
+  body {
+    background: var(--paper); color: var(--ink);
+    font-family: "Source Serif 4", Georgia, serif;
+    font-size: 18px; line-height: 1.68; -webkit-font-smoothing: antialiased;
+  }
+  .wrap { max-width: 1000px; margin: 0 auto; padding: 0 30px; }
+  .col { max-width: 60ch; }
+
+  h1, h2, h3, .eyebrow, .btn, .who-card h3, .step .n, .big-num, .pill {
+    font-family: Archivo, "Helvetica Neue", Arial, sans-serif;
+  }
+  .mono, code, pre, .report { font-family: "IBM Plex Mono", Consolas, monospace;
+                              font-variant-numeric: tabular-nums; }
+
+  h1 { font-size: clamp(2.7rem, 6.6vw, 4.6rem); font-weight: 800; letter-spacing: -.034em;
+       line-height: .97; margin: 0; text-wrap: balance; }
+  h2 { font-size: clamp(1.9rem, 4vw, 2.7rem); font-weight: 800; letter-spacing: -.027em;
+       line-height: 1.06; margin: 0; text-wrap: balance; }
+  h3 { font-size: 1.06rem; font-weight: 700; margin: 0; letter-spacing: -.006em; }
+  p { margin: 0; }
+  a { color: var(--navy); text-underline-offset: 3px; }
+  a:focus-visible, .btn:focus-visible { outline: 2px solid var(--navy); outline-offset: 3px; }
+
+  .eyebrow { font-family: Archivo, sans-serif; font-size: .72rem; font-weight: 600;
+             letter-spacing: .16em; text-transform: uppercase; color: var(--ink-faint); margin: 0; }
+
+  section { padding: 84px 0; border-top: 1px solid var(--rule-soft); }
+  section:first-of-type { border-top: 0; }
+  .head { display: flex; flex-direction: column; gap: 16px; margin-bottom: 44px; }
+
+  /* ── Hero ─────────────────────────────────────────────────────────────── */
+  .hero { padding: 80px 0 72px; }
+  .hero .lede { font-size: 1.28rem; color: var(--ink-soft); margin-top: 26px; max-width: 34ch; }
+  .hero-grid { display: grid; gap: 50px; grid-template-columns: 1fr; align-items: center; }
+  @media (min-width: 900px) { .hero-grid { grid-template-columns: 1.06fr .94fr; gap: 58px; } }
+  .actions { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 32px; }
+  .btn { display: inline-block; font-size: .9rem; font-weight: 600; padding: 12px 22px;
+         border: 1px solid var(--navy); background: var(--navy); color: var(--paper);
+         text-decoration: none; }
+  .btn.ghost { background: transparent; color: var(--navy); }
+  .btn:hover { background: var(--navy-lift); border-color: var(--navy-lift); color: var(--paper); }
+  .btn.ghost:hover { background: transparent; color: var(--navy-lift); }
+  .pill { display: inline-flex; gap: 8px; font-size: .74rem; font-weight: 600; letter-spacing: .05em;
+          color: var(--navy); border: 1px solid var(--rule); border-left: 3px solid var(--navy);
+          background: var(--card); padding: 6px 13px; margin-bottom: 26px; }
+
+  .report { background: var(--term-bg); color: var(--term-ink); font-size: .8rem; line-height: 1.95;
+            padding: 22px 24px; box-shadow: var(--shadow); overflow-x: auto; }
+  .report .l { display: grid; grid-template-columns: 1fr auto; gap: 20px; white-space: nowrap; }
+  .report .k { color: var(--term-dim); }
+  .report .was { color: #E38A8A; }
+  .report .now { color: #6FCF9F; }
+  .report .sum { display: block; margin-top: 14px; padding-top: 14px;
+                 border-top: 1px solid rgba(255,255,255,.09); color: #F2D98A; }
+  .cap { font-size: .8rem; color: var(--ink-faint); margin-top: 12px; }
+
+  /* ── What it does: three plain statements ─────────────────────────────── */
+  .does { display: grid; gap: 26px; }
+  @media (min-width: 860px) { .does { grid-template-columns: repeat(3, 1fr); gap: 34px; } }
+  .do-item { display: flex; flex-direction: column; gap: 11px; }
+  .do-item .verb { font-family: Archivo, sans-serif; font-size: 1.22rem; font-weight: 700;
+                   letter-spacing: -.015em; line-height: 1.2; }
+  .do-item .verb b { color: var(--navy); font-weight: 700; }
+  .do-item p { font-size: .97rem; color: var(--ink-soft); }
+  .do-item .bar { height: 3px; background: var(--navy); width: 34px; }
+
+  /* ── Who needs it: self-identification ───────────────────────────────── */
+  .checks { display: grid; gap: 0; border-top: 1px solid var(--rule); max-width: 74ch; }
+  .check { display: grid; grid-template-columns: 26px 1fr; gap: 16px; align-items: start;
+           padding: 18px 0; border-bottom: 1px solid var(--rule-soft); }
+  .check .tick { color: var(--ok); font-weight: 700; font-family: Archivo, sans-serif;
+                 font-size: 1.15rem; line-height: 1.45; }
+  .check p { font-size: 1.02rem; }
+  .who { display: grid; gap: 1px; background: var(--rule); border: 1px solid var(--rule);
+         margin-top: 44px; }
+  @media (min-width: 840px) { .who { grid-template-columns: repeat(3, 1fr); } }
+  .who-card { background: var(--card); padding: 26px 24px; display: flex; flex-direction: column; gap: 10px; }
+  .who-card h3 { color: var(--navy); }
+  .who-card p { font-size: .95rem; color: var(--ink-soft); }
+
+  /* ── How: three steps, a real sequence ───────────────────────────────── */
+  .steps { display: grid; gap: 34px; }
+  @media (min-width: 880px) { .steps { grid-template-columns: repeat(3, 1fr); gap: 40px; } }
+  .step { display: flex; flex-direction: column; gap: 12px; }
+  .step .n { font-size: .74rem; font-weight: 600; letter-spacing: .14em; text-transform: uppercase;
+             color: var(--amber-ink); background: var(--amber-bg); align-self: flex-start;
+             padding: 5px 11px; }
+  .step h3 { font-size: 1.18rem; }
+  .step p { font-size: .97rem; color: var(--ink-soft); }
+
+  .result { display: grid; gap: 28px; margin-top: 52px; align-items: center;
+            border: 1px solid var(--rule); background: var(--card); padding: 34px 32px; }
+  @media (min-width: 760px) { .result { grid-template-columns: auto 1fr; gap: 42px; } }
+  .big-num { font-size: clamp(2.6rem, 7vw, 3.9rem); font-weight: 800; letter-spacing: -.035em;
+             line-height: .95; color: var(--navy); white-space: nowrap; }
+  .big-num em { font-style: normal; color: var(--ink-faint); font-weight: 600; }
+  .big-num s { text-decoration: none; color: var(--ink-faint); }
+  .result p { font-size: 1.02rem; color: var(--ink-soft); }
+  .result .note { font-size: .86rem; color: var(--ink-faint); margin-top: 10px; }
+
+  .callout { background: var(--amber-bg); color: var(--amber-ink); border-left: 3px solid var(--amber-ink);
+             padding: 20px 24px; font-size: 1rem; max-width: 64ch; margin-top: 44px; }
+  .callout b { font-weight: 600; }
+
+  pre.install { background: var(--term-bg); color: var(--term-ink); padding: 20px 22px;
+                font-size: .83rem; line-height: 1.85; overflow-x: auto; margin: 0;
+                box-shadow: var(--shadow); }
+  pre.install .c { color: var(--term-dim); }
+  .asks { display: grid; gap: 10px; margin-top: 30px; max-width: 62ch; }
+  .ask { font-size: 1.02rem; padding: 13px 18px; background: var(--card);
+         border: 1px solid var(--rule); border-left: 3px solid var(--navy); color: var(--ink); }
+
+  footer { border-top: 1px solid var(--rule); padding: 36px 0 64px; color: var(--ink-faint);
+           font-size: .88rem; }
+  footer a { color: var(--ink-soft); }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <!-- ══ HERO ═══════════════════════════════════════════════════════════ -->
+  <section class="hero">
+    <div class="hero-grid">
+      <div>
+        <span class="pill">KB-Compiler · v0.9.2 · MIT</span>
+        <h1>Runbooks that stay right.</h1>
+        <p class="lede">
+          One standard for every KB article your team writes — and one command
+          that checks the whole folder against it.
+        </p>
+        <div class="actions">
+          <a class="btn" href="https://github.com/avatarpds/KB-Compiler-Project/releases/latest">Get it free</a>
+          <a class="btn ghost" href="https://github.com/avatarpds/KB-Compiler-Project">See the code</a>
+        </div>
+      </div>
+      <div>
+        <div class="report">
+          <div class="l"><span class="k">Files the index points to that don't exist</span><span class="was">5 → <span class="now">0</span></span></div>
+          <div class="l"><span class="k">Documents nobody indexed</span><span class="was">9 → <span class="now">4</span></span></div>
+          <div class="l"><span class="k">Names that disagree with each other</span><span class="was">17 → <span class="now">1</span></span></div>
+          <div class="l"><span class="k">Versions that disagree</span><span class="was">4 → <span class="now">0</span></span></div>
+          <div class="l"><span class="k">Missing or broken sections</span><span class="was">54 → <span class="now">9</span></span></div>
+          <div class="l"><span class="k">Formatting off the standard</span><span class="was">108 → <span class="now">4</span></span></div>
+          <span class="sum">SUMMARY: 21 problem(s) found. No file was changed by this script.</span>
+        </div>
+        <p class="cap">A real 60-document IT knowledge base, before and after one cleanup pass.</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- ══ WHAT IT DOES ═══════════════════════════════════════════════════ -->
+  <section>
+    <div class="head col">
+      <p class="eyebrow">What it does</p>
+      <h2>Three things, and it does them the same way every time.</h2>
+    </div>
+    <div class="does">
+      <div class="do-item">
+        <span class="bar"></span>
+        <span class="verb">It <b>knows</b> the standard</span>
+        <p>Section order, Word formatting, the <code>KB-XXX</code> numbering, how the
+          index spreadsheet is kept. You don't memorise any of it, and neither does
+          the next person who joins.</p>
+      </div>
+      <div class="do-item">
+        <span class="bar"></span>
+        <span class="verb">It <b>writes</b> the documents</span>
+        <p>Ask in plain words and it produces the Word file, correctly formatted,
+          with the index row ready for you to approve. It'll also convert a PDF,
+          a slide deck, an email or a rough draft into one.</p>
+      </div>
+      <div class="do-item">
+        <span class="bar"></span>
+        <span class="verb">It <b>checks</b> the whole base</span>
+        <p>One command reads every document and cross-checks it against the index.
+          Sixteen kinds of problem, counted, in a report that ends by telling you
+          it changed nothing.</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- ══ WHO NEEDS IT ═══════════════════════════════════════════════════ -->
+  <section>
+    <div class="head col">
+      <p class="eyebrow">Who needs it</p>
+      <h2>If any of these is true, this is for you.</h2>
+      <p style="color:var(--ink-soft)">
+        Not a hypothetical list. Every one of them is a real finding from a real base.
+      </p>
+    </div>
+    <div class="checks">
+      <div class="check"><span class="tick">✓</span>
+        <p>Your runbooks live in a folder, and a spreadsheet is supposed to say what's in it.</p></div>
+      <div class="check"><span class="tick">✓</span>
+        <p>Two people write documents that look nothing alike, and both are “correct”.</p></div>
+      <div class="check"><span class="tick">✓</span>
+        <p>You can't answer “is this the current version?” without opening three things.</p></div>
+      <div class="check"><span class="tick">✓</span>
+        <p>Someone renamed a file months ago and nobody knows what it broke.</p></div>
+      <div class="check"><span class="tick">✓</span>
+        <p>A new analyst follows a procedure and hits a step that doesn't exist any more.</p></div>
+      <div class="check"><span class="tick">✓</span>
+        <p>An audit is coming and “we have documentation” isn't going to be enough.</p></div>
+    </div>
+    <div class="who">
+      <div class="who-card">
+        <h3>Service desk teams</h3>
+        <p>Where a runbook that's subtly wrong becomes a ticket handled wrongly, at
+          two in the morning, by whoever is on call.</p>
+      </div>
+      <div class="who-card">
+        <h3>IT leads &amp; managers</h3>
+        <p>Who need onboarding to take days rather than months, and need to say
+          what state the documentation is actually in.</p>
+      </div>
+      <div class="who-card">
+        <h3>Small teams &amp; MSPs</h3>
+        <p>No technical writer, no documentation budget, and the knowledge sitting
+          with the one person who set it all up.</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- ══ HOW IT SOLVES IT ═══════════════════════════════════════════════ -->
+  <section>
+    <div class="head col">
+      <p class="eyebrow">How it solves it</p>
+      <h2>The problem isn't writing docs. It's that they drift.</h2>
+      <p style="color:var(--ink-soft)">
+        Nobody sits down and breaks a knowledge base. It happens one reasonable
+        edit at a time — and the damage is invisible until someone relies on it.
+        So the fix has to be something you can re-run, not a one-off tidy-up.
+      </p>
+    </div>
+    <div class="steps">
+      <div class="step">
+        <span class="n">Once, at the start</span>
+        <h3>It asks where things live</h3>
+        <p>Your folder, the label for document footers, and which language your
+          documents are written in. It remembers, and never asks again.</p>
+      </div>
+      <div class="step">
+        <span class="n">Any time</span>
+        <h3>You run the check</h3>
+        <p>Seconds, read-only, on the whole base. Exit code <code>0</code> clean,
+          <code>1</code> problems found, <code>2</code> couldn't run — so it works
+          as a gate, not just a report you read.</p>
+      </div>
+      <div class="step">
+        <span class="n">Then</span>
+        <h3>You decide, it does the work</h3>
+        <p>It never edits on its own. It shows what's wrong and what it recommends;
+          renaming, versioning and index updates happen once you say so.</p>
+      </div>
+    </div>
+
+    <div class="result">
+      <div class="big-num"><s>252</s> <em>→</em> 21</div>
+      <div>
+        <p>Findings on a real 60-document base, before and after a single pass —
+          measured, not estimated, because a copy was taken before anything was edited.</p>
+        <p class="note">What's left are the judgement calls it deliberately refuses to make
+          for you: one document with no content to standardise, two histories missing
+          their first entry, and a few files the owner chose to leave alone.</p>
+      </div>
+    </div>
+
+    <div class="callout">
+      <b>It would rather say nothing than cry wolf.</b> Where Word leaves a formatting
+      property unstated, the report lists it as “could not be verified” instead of
+      calling it a problem. A report full of false alarms is one nobody runs twice —
+      so that's the tradeoff it makes, on purpose.
+    </div>
+  </section>
+
+  <!-- ══ START ══════════════════════════════════════════════════════════ -->
+  <section>
+    <div class="head col">
+      <p class="eyebrow">Getting started</p>
+      <h2>Two commands, then just ask.</h2>
+    </div>
+    <pre class="install"><span class="c"># In Claude Code</span>
+/plugin marketplace add avatarpds/KB-Compiler-Project
+/plugin install kb-compiler@kb-compiler</pre>
+    <div class="asks">
+      <div class="ask">“Create a KB about resetting a user's VPN certificate.”</div>
+      <div class="ask">“Review KB-014 against the standard.”</div>
+      <div class="ask">“Turn this PDF into a KB document.”</div>
+      <div class="ask">“Audit the whole base and show me what's broken.”</div>
+    </div>
+    <p style="color:var(--ink-faint);font-size:.92rem;margin-top:26px;max-width:62ch">
+      Works in Portuguese, English, or a base that mixes them. Not tied to any
+      company, folder or path. The audit script also runs standalone with plain
+      Python, with or without the plugin installed.
+    </p>
+  </section>
+
+  <footer>
+    KB-Compiler — free and MIT licensed, by Lucas Souza ·
+    <a href="https://github.com/avatarpds/KB-Compiler-Project">github.com/avatarpds/KB-Compiler-Project</a><br>
+    <span style="font-size:.85rem">Figures are finding counts from a real base audited with v0.9.1. No document content is reproduced.</span>
+  </footer>
+
+</div>
+</body>
+</html>
